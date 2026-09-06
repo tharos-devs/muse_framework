@@ -148,6 +148,7 @@ qt_add_qml_module(muse_uicomponents_qml
         SearchField.qml
         SelectMultipleDirectoriesDialog.qml
         SeparatorLine.qml
+        SplitButton.qml
         StyledBusyIndicator.qml
         StyledDialogView.qml
         StyledDropdown.qml
