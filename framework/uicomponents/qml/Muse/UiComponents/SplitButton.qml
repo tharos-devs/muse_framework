@@ -48,6 +48,8 @@ FocusScope {
 
     readonly property bool isMenuOpened: menuLoader.isMenuOpened
 
+    property alias navigation: navCtrl
+
     signal clicked()
     signal handleMenuItem(string itemId)
     signal aboutToOpenMenu()
