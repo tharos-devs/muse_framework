@@ -19,8 +19,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-pragma ComponentBehavior: Bound
-
 import QtQuick
 import QtQuick.Layouts
 
@@ -52,6 +50,7 @@ FocusScope {
 
     signal clicked()
     signal handleMenuItem(string itemId)
+    signal aboutToOpenMenu()
 
     readonly property bool isHovered: mainMouseArea.containsMouse || arrowMouseArea.containsMouse
     readonly property bool isPressed: mainMouseArea.pressed || arrowMouseArea.pressed
@@ -192,11 +191,11 @@ FocusScope {
             Layout.fillHeight: true
             Layout.preferredWidth: root.arrowAreaWidth
 
-            FlatButtonMenuIndicatorTriangle {
+            StyledIconLabel {
                 anchors.centerIn: parent
-                anchors.margins: 0
-                anchors.right: undefined
-                anchors.bottom: undefined
+                iconCode: IconCode.SMALL_ARROW_DOWN
+                font: ui.theme.iconsFont
+                color: ui.theme.fontPrimaryColor
             }
 
             MouseArea {
@@ -208,6 +207,10 @@ FocusScope {
 
                 onClicked: {
                     ui.tooltip.hide(root, true)
+                    // Gives the caller a chance to refresh root.menuItems synchronously (e.g. its
+                    // checked state) right before the menu is actually shown, in case it only
+                    // updates reactively and could otherwise be stale between opens.
+                    root.aboutToOpenMenu()
                     menuLoader.parent = root
                     menuLoader.toggleOpened(root.menuItems)
                 }
