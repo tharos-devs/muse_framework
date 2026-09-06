@@ -25,6 +25,7 @@
 #include <QColor>
 #include <QPointF>
 #include <QQuickPaintedItem>
+#include <QString>
 #include <QVector>
 #include <qqmlintegration.h>
 
@@ -89,6 +90,7 @@ class PolylinePlot : public QQuickPaintedItem, public muse::async::Asyncable, pu
     Q_PROPERTY(qreal activePointX READ activePointX NOTIFY activePointChanged)
     Q_PROPERTY(qreal activePointY READ activePointY NOTIFY activePointChanged)
     Q_PROPERTY(qreal activePointValue READ activePointValue NOTIFY activePointChanged)
+    Q_PROPERTY(QString activePointLabel READ activePointLabel WRITE setActivePointLabel NOTIFY activePointLabelChanged)
 
     QML_ELEMENT
 
@@ -166,6 +168,8 @@ public:
     qreal activePointX() const;
     qreal activePointY() const;
     qreal activePointValue() const;
+    QString activePointLabel() const;
+    void setActivePointLabel(const QString&);
 
     void geometryChange(const QRectF& newG, const QRectF& oldG) override;
     void paint(QPainter* painter) override;
@@ -204,6 +208,7 @@ signals:
     void colorsUnderLineChanged();
 
     void activePointChanged();
+    void activePointLabelChanged();
 
 protected:
     void hoverMoveEvent(QHoverEvent* e) override;
@@ -245,6 +250,7 @@ private:
 
     void drawLinesAndFillUnder(QPainter* painter) const;
     void paintPoint(QPainter* painter, const PolylinePointStyle* style, const QPointF& centre, bool useHoveredStyle) const;
+    void paintValueLabel(QPainter* painter) const;
 
 private:
     QColor m_lineColor;
@@ -302,5 +308,6 @@ private:
     bool m_hasActivePoint = false;
     QPointF m_activePointPx;
     qreal m_activePointValue = 0.0;
+    QString m_activePointLabel;
 };
 }

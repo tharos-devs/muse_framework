@@ -23,6 +23,7 @@
 #include "polylineplot.h"
 
 #include <QCursor>
+#include <QFontMetrics>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -44,6 +45,12 @@ constexpr double BOUNDARY_MARGIN = 0.1;
 
 static constexpr int INVALID_POINT_IDX = -1;
 static constexpr int PENDING_POINT_IDX = -2;
+
+constexpr qreal VALUE_LABEL_PADDING_X_PX = 6.0;
+constexpr qreal VALUE_LABEL_PADDING_Y_PX = 3.0;
+constexpr qreal VALUE_LABEL_GAP_PX = 8.0;
+constexpr qreal VALUE_LABEL_CORNER_RADIUS_PX = 4.0;
+constexpr qreal VALUE_LABEL_FONT_PX = 12.0;
 
 static inline qreal toPxX(const QQuickItem* item, qreal xN)
 {
@@ -565,6 +572,23 @@ qreal PolylinePlot::activePointY() const
 qreal PolylinePlot::activePointValue() const
 {
     return m_activePointValue;
+}
+
+QString PolylinePlot::activePointLabel() const
+{
+    return m_activePointLabel;
+}
+
+void PolylinePlot::setActivePointLabel(const QString& label)
+{
+    if (m_activePointLabel == label) {
+        return;
+    }
+
+    m_activePointLabel = label;
+    emit activePointLabelChanged();
+
+    update();
 }
 
 void PolylinePlot::setDefaultValue(qreal v)
@@ -1238,6 +1262,50 @@ void PolylinePlot::paint(QPainter* painter)
             paintPoint(painter, m_ghostPointStyle, hp, /*useHoveredStyle*/ false);
         }
     }
+
+    // Only the point actually being dragged gets a live value readout.
+    if (m_pressed && m_hasActivePoint && !m_activePointLabel.isEmpty()) {
+        paintValueLabel(painter);
+    }
+}
+
+void PolylinePlot::paintValueLabel(QPainter* painter) const
+{
+    QFont font = painter->font();
+    font.setPixelSize(static_cast<int>(VALUE_LABEL_FONT_PX));
+    painter->setFont(font);
+
+    const QFontMetrics metrics(font);
+    const QSize textSize = metrics.size(Qt::TextSingleLine, m_activePointLabel);
+
+    const qreal chipWidth = textSize.width() + 2 * VALUE_LABEL_PADDING_X_PX;
+    const qreal chipHeight = textSize.height() + 2 * VALUE_LABEL_PADDING_Y_PX;
+
+    const qreal pointPx = m_activePointPx.x();
+    const qreal topPx = m_activePointPx.y();
+
+    // Prefer sitting to the right of the point; flip to the left if there isn't room, rather than
+    // letting the chip run off the edge of the staff.
+    qreal chipLeft = pointPx + VALUE_LABEL_GAP_PX;
+    if (chipLeft + chipWidth > width()) {
+        chipLeft = pointPx - VALUE_LABEL_GAP_PX - chipWidth;
+    }
+    chipLeft = std::clamp(chipLeft, 0.0, std::max(0.0, width() - chipWidth));
+
+    const qreal chipTop = std::clamp(topPx - chipHeight / 2.0, 0.0, std::max(0.0, height() - chipHeight));
+
+    const QRectF chipRect(chipLeft, chipTop, chipWidth, chipHeight);
+
+    const muse::ui::ThemeInfo& theme = uiConfiguration()->currentTheme();
+    const QColor bgColor(theme.values[muse::ui::ThemeStyleKey::POPUP_BACKGROUND_COLOR].toString());
+    const QColor textColor(theme.values[muse::ui::ThemeStyleKey::FONT_PRIMARY_COLOR].toString());
+
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(bgColor);
+    painter->drawRoundedRect(chipRect, VALUE_LABEL_CORNER_RADIUS_PX, VALUE_LABEL_CORNER_RADIUS_PX);
+
+    painter->setPen(textColor);
+    painter->drawText(chipRect, Qt::AlignCenter, m_activePointLabel);
 }
 
 void PolylinePlot::hoverMoveEvent(QHoverEvent* e)
