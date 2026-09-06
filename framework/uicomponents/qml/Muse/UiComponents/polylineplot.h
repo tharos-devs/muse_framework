@@ -170,6 +170,7 @@ public:
     qreal activePointValue() const;
     QString activePointLabel() const;
     void setActivePointLabel(const QString&);
+    void setValueLabelColors(const QColor& background, const QColor& text);
 
     void geometryChange(const QRectF& newG, const QRectF& oldG) override;
     void paint(QPainter* painter) override;
@@ -309,5 +310,7 @@ private:
     QPointF m_activePointPx;
     qreal m_activePointValue = 0.0;
     QString m_activePointLabel;
+    QColor m_valueLabelBgColor;
+    QColor m_valueLabelTextColor;
 };
 }

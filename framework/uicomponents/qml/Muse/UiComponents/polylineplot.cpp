@@ -46,11 +46,17 @@ constexpr double BOUNDARY_MARGIN = 0.1;
 static constexpr int INVALID_POINT_IDX = -1;
 static constexpr int PENDING_POINT_IDX = -2;
 
-constexpr qreal VALUE_LABEL_PADDING_X_PX = 6.0;
-constexpr qreal VALUE_LABEL_PADDING_Y_PX = 3.0;
-constexpr qreal VALUE_LABEL_GAP_PX = 8.0;
-constexpr qreal VALUE_LABEL_CORNER_RADIUS_PX = 4.0;
-constexpr qreal VALUE_LABEL_FONT_PX = 12.0;
+// Matches notevelocityoverlay.cpp's drag-tooltip chip exactly, for visual consistency between
+// the two features' drag tooltips.
+constexpr qreal VALUE_LABEL_FONT_PX = 11.0;
+constexpr qreal VALUE_LABEL_GAP_PX = 4.0;
+constexpr qreal VALUE_LABEL_PADDING_X_PX = 4.0;
+constexpr qreal VALUE_LABEL_PADDING_Y_PX = 2.0;
+constexpr qreal VALUE_LABEL_CORNER_RADIUS_PX = 3.0;
+// A point marker (esp. selected, with its middle ring) extends past its bare center by a few px -
+// unlike a velocity bar (whose own width already keeps the gap clear of it), the point's own radius
+// needs to be added to the gap too, or the chip can overlap the marker itself.
+constexpr qreal VALUE_LABEL_POINT_CLEARANCE_PX = 6.0;
 
 static inline qreal toPxX(const QQuickItem* item, qreal xN)
 {
@@ -588,6 +594,13 @@ void PolylinePlot::setActivePointLabel(const QString& label)
     m_activePointLabel = label;
     emit activePointLabelChanged();
 
+    update();
+}
+
+void PolylinePlot::setValueLabelColors(const QColor& background, const QColor& text)
+{
+    m_valueLabelBgColor = background;
+    m_valueLabelTextColor = text;
     update();
 }
 
@@ -1286,9 +1299,10 @@ void PolylinePlot::paintValueLabel(QPainter* painter) const
 
     // Prefer sitting to the right of the point; flip to the left if there isn't room, rather than
     // letting the chip run off the edge of the staff.
-    qreal chipLeft = pointPx + VALUE_LABEL_GAP_PX;
+    const qreal offsetPx = VALUE_LABEL_GAP_PX + VALUE_LABEL_POINT_CLEARANCE_PX;
+    qreal chipLeft = pointPx + offsetPx;
     if (chipLeft + chipWidth > width()) {
-        chipLeft = pointPx - VALUE_LABEL_GAP_PX - chipWidth;
+        chipLeft = pointPx - offsetPx - chipWidth;
     }
     chipLeft = std::clamp(chipLeft, 0.0, std::max(0.0, width() - chipWidth));
 
@@ -1296,15 +1310,11 @@ void PolylinePlot::paintValueLabel(QPainter* painter) const
 
     const QRectF chipRect(chipLeft, chipTop, chipWidth, chipHeight);
 
-    const muse::ui::ThemeInfo& theme = uiConfiguration()->currentTheme();
-    const QColor bgColor(theme.values[muse::ui::ThemeStyleKey::POPUP_BACKGROUND_COLOR].toString());
-    const QColor textColor(theme.values[muse::ui::ThemeStyleKey::FONT_PRIMARY_COLOR].toString());
-
     painter->setPen(Qt::NoPen);
-    painter->setBrush(bgColor);
+    painter->setBrush(m_valueLabelBgColor);
     painter->drawRoundedRect(chipRect, VALUE_LABEL_CORNER_RADIUS_PX, VALUE_LABEL_CORNER_RADIUS_PX);
 
-    painter->setPen(textColor);
+    painter->setPen(m_valueLabelTextColor);
     painter->drawText(chipRect, Qt::AlignCenter, m_activePointLabel);
 }
 
