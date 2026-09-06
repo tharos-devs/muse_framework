@@ -54,11 +54,28 @@ FocusScope {
     signal handleMenuItem(string itemId)
     signal aboutToOpenMenu()
 
+    function toggleMenu() {
+        ui.tooltip.hide(root, true)
+        navCtrl.requestActiveByInteraction()
+        // Gives the caller a chance to refresh root.menuItems synchronously (e.g. its checked
+        // state) right before the menu is actually shown, in case it only updates reactively and
+        // could otherwise be stale between opens.
+        root.aboutToOpenMenu()
+        menuLoader.parent = root
+        menuLoader.toggleOpened(root.menuItems)
+    }
+
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Down && (event.modifiers & Qt.AltModifier)) {
+            root.toggleMenu()
+            event.accepted = true
+        }
+    }
+
     readonly property bool isHovered: mainMouseArea.containsMouse || arrowMouseArea.containsMouse
     readonly property bool isPressed: mainMouseArea.pressed || arrowMouseArea.pressed
 
     readonly property color normalColor: root.checked ? ui.theme.accentColor : ui.theme.buttonColor
-    readonly property color hoverHitColor: root.checked ? ui.theme.accentColor : ui.theme.buttonColor
 
     readonly property int arrowAreaWidth: 20
 
@@ -67,7 +84,7 @@ FocusScope {
 
     readonly property real mainContentMargins: 12
 
-    objectName: root.text
+    objectName: root.text !== "" ? root.text : root.toolTipTitle
 
     NavigationControl {
         id: navCtrl
@@ -104,22 +121,20 @@ FocusScope {
         states: [
             State {
                 name: "PRESSED"
-                when: root.isPressed
+                when: root.isPressed || root.isMenuOpened
 
                 PropertyChanges {
                     target: background
-                    color: root.hoverHitColor
                     opacity: ui.theme.buttonOpacityHit
                 }
             },
 
             State {
                 name: "HOVERED"
-                when: root.isHovered && !root.isPressed
+                when: root.isHovered && !root.isPressed && !root.isMenuOpened
 
                 PropertyChanges {
                     target: background
-                    color: root.hoverHitColor
                     opacity: ui.theme.buttonOpacityHover
                 }
             }
@@ -208,13 +223,7 @@ FocusScope {
                 hoverEnabled: true
 
                 onClicked: {
-                    ui.tooltip.hide(root, true)
-                    // Gives the caller a chance to refresh root.menuItems synchronously (e.g. its
-                    // checked state) right before the menu is actually shown, in case it only
-                    // updates reactively and could otherwise be stale between opens.
-                    root.aboutToOpenMenu()
-                    menuLoader.parent = root
-                    menuLoader.toggleOpened(root.menuItems)
+                    root.toggleMenu()
                 }
             }
         }
