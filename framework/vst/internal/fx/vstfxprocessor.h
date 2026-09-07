@@ -44,6 +44,7 @@ public:
 
     const muse::audio::AudioFxParams& params() const override;
     async::Channel<muse::audio::AudioFxParams> paramsChanged() const override;
+    void setChainOrder(muse::audio::AudioFxChainOrder chainOrder) override;
 
     void setOutputSpec(const audio::OutputSpec& spec) override;
 

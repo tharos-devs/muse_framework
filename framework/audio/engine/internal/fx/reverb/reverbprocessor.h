@@ -43,6 +43,7 @@ public:
     std::string name() const override;
     const AudioFxParams& params() const override;
     async::Channel<audio::AudioFxParams> paramsChanged() const override;
+    void setChainOrder(AudioFxChainOrder chainOrder) override;
     void setOutputSpec(const OutputSpec& spec) override;
 
     bool active() const override;

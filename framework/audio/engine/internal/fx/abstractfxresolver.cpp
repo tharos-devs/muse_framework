@@ -233,6 +233,13 @@ AbstractFxResolver::FxMap AbstractFxResolver::relocateMovedFx(FxMap& fxMap, Audi
             continue;
         }
 
+        //! NOTE: the processor itself still thinks it lives at the old chainOrder (that's
+        //! baked into its own AudioFxParams at creation time) even though it's being moved
+        //! to a new key here. Without updating it, FxChain::setFxChainSpec's lookup (which
+        //! matches by chainOrder) fails to find this node at its new position and erases it
+        //! from the spec, leaving both the old and new slots looking empty.
+        it->second->setChainOrder(move.second);
+
         relocated.emplace(move.second, std::move(it->second));
         fxMap.erase(it);
         currentFxChain.erase(move.first);

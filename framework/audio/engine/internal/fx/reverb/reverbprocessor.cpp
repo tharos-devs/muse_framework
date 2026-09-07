@@ -339,6 +339,11 @@ void ReverbProcessor::setActive(bool active)
     m_params.active = active;
 }
 
+void ReverbProcessor::setChainOrder(AudioFxChainOrder chainOrder)
+{
+    m_params.chainOrder = chainOrder;
+}
+
 void ReverbProcessor::setMode(const ProcessMode)
 {
 }

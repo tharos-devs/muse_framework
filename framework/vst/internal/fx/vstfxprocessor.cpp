@@ -110,6 +110,11 @@ void VstFxProcessor::setActive(bool active)
     m_params.active = active;
 }
 
+void VstFxProcessor::setChainOrder(muse::audio::AudioFxChainOrder chainOrder)
+{
+    m_params.chainOrder = chainOrder;
+}
+
 void VstFxProcessor::setMode(const muse::audio::ProcessMode mode)
 {
     m_vstAudioClient->setIsPlaying(muse::audio::isModePlaying(mode));

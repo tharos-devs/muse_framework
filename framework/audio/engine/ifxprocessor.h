@@ -37,6 +37,7 @@ public:
 
     virtual const AudioFxParams& params() const = 0;
     virtual async::Channel<audio::AudioFxParams> paramsChanged() const = 0;
+    virtual void setChainOrder(AudioFxChainOrder chainOrder) = 0;
 
     virtual void setOutputSpec(const OutputSpec& spec) = 0;
 
