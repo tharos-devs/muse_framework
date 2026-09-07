@@ -71,6 +71,8 @@ void AbstractFxResolver::updateTrackFxMap(FxMap& fxMap, const audio::TrackId tra
         currentFxChain.emplace(pair.first, pair.second->params());
     }
 
+    FxMap relocatedFx = relocateMovedFx(fxMap, currentFxChain, newFxChain);
+
     audio::AudioFxChain fxToRemove;
     fxChainToRemove(currentFxChain, newFxChain, fxToRemove);
 
@@ -85,10 +87,18 @@ void AbstractFxResolver::updateTrackFxMap(FxMap& fxMap, const audio::TrackId tra
     fxChainToCreate(currentFxChain, newFxChain, fxToCreate);
 
     for (const auto& pair : fxToCreate) {
+        if (relocatedFx.find(pair.first) != relocatedFx.cend()) {
+            continue;
+        }
+
         IFxProcessorPtr fxPtr = createTrackFx(trackId, pair.second, outputSpec);
         if (fxPtr) {
             fxMap.emplace(pair.first, std::move(fxPtr));
         }
+    }
+
+    for (auto& pair : relocatedFx) {
+        fxMap.emplace(pair.first, std::move(pair.second));
     }
 }
 
@@ -98,6 +108,8 @@ void AbstractFxResolver::updateMasterFxMap(const AudioFxChain& newFxChain, const
     for (const auto& pair : m_masterFxMap) {
         currentFxChain.emplace(pair.first, pair.second->params());
     }
+
+    FxMap relocatedFx = relocateMovedFx(m_masterFxMap, currentFxChain, newFxChain);
 
     audio::AudioFxChain fxToRemove;
     fxChainToRemove(currentFxChain, newFxChain, fxToRemove);
@@ -113,10 +125,18 @@ void AbstractFxResolver::updateMasterFxMap(const AudioFxChain& newFxChain, const
     fxChainToCreate(currentFxChain, newFxChain, fxToCreate);
 
     for (const auto& pair : fxToCreate) {
+        if (relocatedFx.find(pair.first) != relocatedFx.cend()) {
+            continue;
+        }
+
         IFxProcessorPtr fx = createMasterFx(pair.second, outputSpec);
         if (fx) {
             m_masterFxMap.emplace(pair.first, fx);
         }
+    }
+
+    for (auto& pair : relocatedFx) {
+        m_masterFxMap.emplace(pair.first, std::move(pair.second));
     }
 }
 
@@ -159,4 +179,64 @@ void AbstractFxResolver::fxChainToCreate(const AudioFxChain& currentFxChain,
             resultChain.insert({ it->first, it->second });
         }
     }
+}
+
+AbstractFxResolver::FxMap AbstractFxResolver::relocateMovedFx(FxMap& fxMap, AudioFxChain& currentFxChain, const AudioFxChain& newFxChain)
+{
+    std::vector<std::pair<AudioFxChainOrder, AudioFxChainOrder> > moves;
+
+    for (const auto& pair : fxMap) {
+        AudioFxChainOrder oldOrder = pair.first;
+        const AudioResourceMeta& resourceMeta = pair.second->params().resourceMeta;
+
+        auto sameSpotIt = newFxChain.find(oldOrder);
+        if (sameSpotIt != newFxChain.cend() && sameSpotIt->second.resourceMeta == resourceMeta) {
+            continue; // still at the same position, nothing to relocate
+        }
+
+        for (const auto& newPair : newFxChain) {
+            AudioFxChainOrder newOrder = newPair.first;
+            if (newOrder == oldOrder || newPair.second.resourceMeta != resourceMeta) {
+                continue;
+            }
+
+            bool newOrderAlreadyClaimed = false;
+            for (const auto& move : moves) {
+                if (move.second == newOrder) {
+                    newOrderAlreadyClaimed = true;
+                    break;
+                }
+            }
+            if (newOrderAlreadyClaimed) {
+                continue;
+            }
+
+            // That position may already be correctly occupied by another
+            // live instance of the same resource (e.g. two identical fx of
+            // the same type sitting right next to each other) -- leave it
+            // alone rather than relocating on top of it.
+            auto occupantIt = currentFxChain.find(newOrder);
+            if (occupantIt != currentFxChain.cend() && occupantIt->second.resourceMeta == resourceMeta) {
+                continue;
+            }
+
+            moves.emplace_back(oldOrder, newOrder);
+            break;
+        }
+    }
+
+    FxMap relocated;
+
+    for (const auto& move : moves) {
+        auto it = fxMap.find(move.first);
+        IF_ASSERT_FAILED(it != fxMap.end()) {
+            continue;
+        }
+
+        relocated.emplace(move.second, std::move(it->second));
+        fxMap.erase(it);
+        currentFxChain.erase(move.first);
+    }
+
+    return relocated;
 }

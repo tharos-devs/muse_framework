@@ -53,6 +53,21 @@ private:
     void fxChainToRemove(const AudioFxChain& currentFxChain, const AudioFxChain& newFxChain, AudioFxChain& resultChain);
     void fxChainToCreate(const AudioFxChain& currentFxChain, const AudioFxChain& newFxChain, AudioFxChain& resultChain);
 
+    //! NOTE An effect that's simply moved to a different chainOrder (same
+    //! resourceMeta, e.g. after a Mixer FX drag-and-drop reorder) would
+    //! otherwise look, to the purely position-keyed fxChainToRemove/
+    //! fxChainToCreate diff above, like one effect disappearing and an
+    //! unrelated one appearing at each affected position -- destroying and
+    //! recreating the live plugin instance (costly and glitch-prone for a
+    //! real-time VST/VSTi) for what's really just a reorder. Detects that
+    //! case and relocates the existing instance(s) to their new key in
+    //! fxMap/currentFxChain instead, so the diff below sees no change for
+    //! them at all. Returns the relocated instances, keyed by their NEW
+    //! chainOrder -- callers should skip creating anew at those positions
+    //! and insert these back into fxMap only after the normal remove pass
+    //! has vacated any conflicting occupant there.
+    FxMap relocateMovedFx(FxMap& fxMap, AudioFxChain& currentFxChain, const AudioFxChain& newFxChain);
+
     std::map<TrackId, FxMap> m_tracksFxMap;
     FxMap m_masterFxMap;
 };
