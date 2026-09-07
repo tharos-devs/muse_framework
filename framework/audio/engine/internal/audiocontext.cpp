@@ -367,6 +367,15 @@ void AudioContext::onFxChainParamsChanged(Track& track, const AudioFxChain& para
     track.chain->rebuild();
 
     track.params.fxChain = fxChain->fxChainSpec();
+
+    //! NOTE: fxChain is freshly constructed above, so any Channel it fires while applying its
+    //! initial state (inside makeTrackFxChain -> setFxList/setFxChainSpec) happens before the
+    //! onReceive() subscriptions a few lines up and is silently dropped (Channel::send() no-ops
+    //! with zero subscribers). Read the resulting state back explicitly so callers relying on
+    //! these echoes (e.g. persisting the fx chain to the project file, or tracking which tracks
+    //! need processing during silence) always get notified of the change.
+    m_fxChainParamsChanged.send(trackId, track.params.fxChain);
+    onShouldProcessDuringSilenceChanged(trackId, fxChain->shouldProcessDuringSilence());
 }
 
 void AudioContext::onAuxSendsParamsChanged(Track& track, const AuxSendsParams& params)
