@@ -75,10 +75,10 @@ void TopLevelToolBarsLayout::relayout()
     adjustContentForAvailableSpace(page);
     alignToolBars(page, width);
 
-    //! NOTE: Force the layouting items to pick up the current dock minimums
+    //! NOTE: Force the layouting items to pick up the current dock size constraints
     for (DockBase* dock : page->allDocks()) {
         if (dock) {
-            dock->syncLayoutItemMinSize();
+            dock->syncLayoutItemSizeConstraints();
         }
     }
 

@@ -740,9 +740,11 @@ void DockBase::applySizeConstraints()
         const QRect winRect(window->dragRect().topLeft(), winSize);
         window->view()->setGeometry(winRect);
     }
+
+    syncLayoutItemSizeConstraints();
 }
 
-void DockBase::syncLayoutItemMinSize()
+void DockBase::syncLayoutItemSizeConstraints()
 {
     if (!m_dockWidget) {
         return;
@@ -758,11 +760,23 @@ void DockBase::syncLayoutItemMinSize()
         return;
     }
 
-    //! NOTE: The layouting item caches the guest minimum; force it to match the group's current
-    //! minimum so the container's minimum size reflects
+    //! NOTE: the layouting item caches its own guest min/max size for its separator-drag math
+    //! (used by e.g. DockBase::resize() -> resizeInLayout() -> Item::requestResize()), and
+    //! nothing keeps that cache in sync with the group's live min/max on its own - force both
+    //! to match here so a runtime minimumHeight/maximumHeight change (e.g. from QML) is actually
+    //! respected, not just by the QtQuick view itself. Previously this only synced the minimum,
+    //! and only for top-level toolbars (see TopLevelToolBarsLayout::relayout()); generalizing it
+    //! to run for every dock via applySizeConstraints() below fixes panels (e.g. the Mixer) whose
+    //! content-driven resize (resizePanelToContentHeight()) could otherwise fight a stale cached
+    //! maximum and visibly jump/reflow.
     const QSize min = group->view()->minSize();
     if (item->minSize() != min) {
         item->setMinSize(min);
+    }
+
+    const QSize max = group->view()->maxSizeHint();
+    if (item->maxSizeHint() != max) {
+        item->setMaxSizeHint(max);
     }
 }
 
