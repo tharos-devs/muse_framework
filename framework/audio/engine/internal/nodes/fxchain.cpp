@@ -79,6 +79,17 @@ void FxChain::setFxChainSpec(const AudioFxChain& fxChainSpec)
 
     m_fxChainSpec = fxChainSpec;
     for (auto it = m_fxChainSpec.begin(); it != m_fxChainSpec.end();) {
+        //! NOTE: a blank/placeholder slot (invalid resourceMeta) never gets a corresponding
+        //! FxNode - that's by design (setFxList()/the fx resolver skip creating nodes for
+        //! invalid entries), not a sign the entry was removed. Erasing it here would silently
+        //! drop every blank slot from the spec echoed back to the app on every single fx-chain
+        //! change (even just toggling one plugin's bypass), making the app think its whole
+        //! blank-slot layout for this track was removed and rebuilding it from scratch.
+        if (!it->second.isValid()) {
+            ++it;
+            continue;
+        }
+
         if (FxNodePtr fx = findFxNode(*it)) {
             fx->setBypassed(!it->second.active);
             ++it;
