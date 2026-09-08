@@ -72,7 +72,7 @@ Ret Mixer::addTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends)
     return make_ok();
 }
 
-Ret Mixer::addAuxTrack(TrackChainPtr trackChain)
+Ret Mixer::addAuxTrack(TrackChainPtr trackChain, bool isGroupBus)
 {
     ONLY_AUDIO_ENGINE_THREAD;
     const size_t outBufferSize = m_outputSpec.samplesPerChannel * m_outputSpec.audioChannelCount;
@@ -81,6 +81,7 @@ Ret Mixer::addAuxTrack(TrackChainPtr trackChain)
     trackData.trackId = trackChain->trackId();
     trackData.chain = trackChain;
     trackData.buffer.resize(outBufferSize);
+    trackData.isGroupBus = isGroupBus;
 
     m_auxTracks.emplace_back(std::move(trackData));
 
@@ -166,8 +167,16 @@ void Mixer::process(float* outBuffer, samples_t samplesPerChannel)
             }
         }
 
-        mixOutputFromChannel(outBuffer, t.buffer.data(), outBufferSize);
-        writeTrackToAuxBuffers(t.buffer.data(), outBufferSize, m_auxSends[t.trackId]);
+        const AuxSendsParams& auxSends = m_auxSends[t.trackId];
+
+        //! NOTE: a track routed to a "group" bus has that bus as its ONLY path to master -
+        //! skip its own direct mix so its signal doesn't ALSO leak straight to master in
+        //! parallel (unlike a regular send/return aux bus, where both paths coexist by design)
+        if (!hasActiveGroupBusSend(auxSends)) {
+            mixOutputFromChannel(outBuffer, t.buffer.data(), outBufferSize);
+        }
+
+        writeTrackToAuxBuffers(t.buffer.data(), outBufferSize, auxSends);
     }
 
     processAuxChannels(outBuffer, samplesPerChannel);
@@ -358,6 +367,18 @@ void Mixer::processAuxChannels(float* buffer, samples_t samplesPerChannel)
             mixOutputFromChannel(buffer, auxBuffer, outBufferSize);
         }
     }
+}
+
+bool Mixer::hasActiveGroupBusSend(const AuxSendsParams& auxSends) const
+{
+    for (aux_channel_idx_t i = 0; i < auxSends.size() && i < m_auxTracks.size(); ++i) {
+        const AuxSendParams& send = auxSends.at(i);
+        if (send.active && !muse::is_zero(send.signalAmount) && m_auxTracks.at(i).isGroupBus) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::string Mixer::dump() const

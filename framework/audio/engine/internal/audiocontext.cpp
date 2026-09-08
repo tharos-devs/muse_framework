@@ -257,7 +257,7 @@ RetVal2<TrackId, TrackParams> AudioContext::addAuxTrack(const std::string& track
     trackChain->setSignal(std::make_shared<SignalNode>());
     trackChain->rebuild();
 
-    Ret ret = m_mixer->addAuxTrack(trackChain);
+    Ret ret = m_mixer->addAuxTrack(trackChain, params.isGroupBus);
     if (!ret) {
         return RetType::make_ret(ret);
     }
