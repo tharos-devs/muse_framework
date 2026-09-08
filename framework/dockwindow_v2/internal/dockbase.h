@@ -198,7 +198,7 @@ protected:
 
     void doSetFloating(bool floating);
 
-    void syncLayoutItemMinSize();
+    void syncLayoutItemSizeConstraints();
 
 protected slots:
     void applySizeConstraints();
