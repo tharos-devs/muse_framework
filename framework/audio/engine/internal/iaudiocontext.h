@@ -67,6 +67,7 @@ public:
 
     virtual async::Channel<TrackId, AudioSourceParams> sourceParamsChanged() const = 0;
     virtual async::Channel<TrackId, AudioFxChain> fxChainParamsChanged() const = 0;
+    virtual async::Channel<TrackId, AuxSendsParams> auxSendsParamsChanged() const = 0;
 
     // Input processing
     virtual void processInput(const TrackId trackId) const = 0;

@@ -103,6 +103,7 @@ void AudioContext::deinit()
     m_saveSoundTracksProgress = SaveSoundTrackProgressData();
     m_sourceParamsChanged = async::Channel<TrackId, AudioSourceParams>();
     m_fxChainParamsChanged = async::Channel<TrackId, AudioFxChain>();
+    m_auxSendsParamsChanged = async::Channel<TrackId, AuxSendsParams>();
 
     async_disconnectAll();
 }
@@ -347,6 +348,7 @@ void AudioContext::onFxChainParamsChanged(Track& track, const AudioFxChain& para
     ONLY_AUDIO_ENGINE_THREAD;
 
     const TrackId trackId = track.id;
+
     std::shared_ptr<IPlayheadPosition> playheadPosition = std::static_pointer_cast<IPlayheadPosition>(m_player);
 
     // Make fx chain
@@ -367,6 +369,15 @@ void AudioContext::onFxChainParamsChanged(Track& track, const AudioFxChain& para
     track.chain->rebuild();
 
     track.params.fxChain = fxChain->fxChainSpec();
+
+    // fxChain's construction above may have already synchronously emitted its
+    // initial fxChainSpecChanged (e.g. from an already-loaded plugin reporting
+    // its params during setFxList), before the listener was registered just
+    // above. That first emission is otherwise silently lost, so the app layer
+    // never learns about this rebuild. Send the now-settled spec once here,
+    // unconditionally, so callers (e.g. the project-dirty-flag mechanism) always
+    // get at least one echo per rebuild regardless of that race.
+    m_fxChainParamsChanged.send(trackId, track.params.fxChain);
 }
 
 void AudioContext::onAuxSendsParamsChanged(Track& track, const AuxSendsParams& params)
@@ -376,6 +387,8 @@ void AudioContext::onAuxSendsParamsChanged(Track& track, const AuxSendsParams& p
     m_mixer->setAuxSends(track.id, params);
 
     track.params.auxSends = params;
+
+    m_auxSendsParamsChanged.send(track.id, params);
 }
 
 void AudioContext::removeTrack(const TrackId trackId)
@@ -591,6 +604,12 @@ async::Channel<TrackId, AudioFxChain> AudioContext::fxChainParamsChanged() const
 {
     ONLY_AUDIO_ENGINE_THREAD;
     return m_fxChainParamsChanged;
+}
+
+async::Channel<TrackId, AuxSendsParams> AudioContext::auxSendsParamsChanged() const
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+    return m_auxSendsParamsChanged;
 }
 
 void AudioContext::processInput(const TrackId trackId) const

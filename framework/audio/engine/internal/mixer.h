@@ -90,6 +90,11 @@ private:
         TrackChainPtr chain;
         std::vector<float> buffer;
         bool processed = false;
+        //! NOTE: for aux tracks only - bounds how much longer to keep processing (with
+        //! silence) after the last cycle something was actually written to this bus, so
+        //! an fx tail (e.g. reverb) can ring out and the level meter can settle, without
+        //! risking indefinite processing if the fx never produces an exact zero output
+        samples_t silenceGraceSamplesLeft = 0;
     };
 
     std::vector<TrackData> m_tracks;

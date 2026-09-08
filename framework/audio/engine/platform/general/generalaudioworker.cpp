@@ -21,6 +21,9 @@
  */
 #include "generalaudioworker.h"
 
+#include <chrono>
+#include <future>
+
 #include "global/concurrency/threadutils.h"
 
 #ifdef Q_OS_WIN
@@ -89,8 +92,29 @@ void GeneralAudioWorker::setInterval(const samples_t samples, const sample_rate_
 void GeneralAudioWorker::stop()
 {
     m_running = false;
-    if (m_thread) {
-        m_thread->join();
+
+    if (!m_thread) {
+        return;
+    }
+
+    //! NOTE: std::thread has no built-in timed join. If th_main is genuinely stuck inside
+    //! a blocking call (e.g. a misbehaving VST3 plugin during teardown), an untimed join()
+    //! here would hang app shutdown forever. Hand the thread off to a detached watcher that
+    //! joins it whenever it actually finishes (even well after this function returns), and
+    //! only wait here for a bounded time before giving up and letting shutdown continue.
+    auto donePromise = std::make_shared<std::promise<void> >();
+    std::future<void> done = donePromise->get_future();
+
+    std::thread watcher([owned = std::move(m_thread), donePromise]() mutable {
+        owned->join();
+        donePromise->set_value();
+    });
+    watcher.detach();
+
+    constexpr auto STOP_TIMEOUT = std::chrono::seconds(3);
+    if (done.wait_for(STOP_TIMEOUT) != std::future_status::ready) {
+        LOGW() << "audio worker thread did not stop within " << STOP_TIMEOUT.count()
+               << "s; abandoning it in the background rather than hang shutdown";
     }
 }
 
