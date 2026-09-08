@@ -88,6 +88,7 @@ public:
 
     async::Channel<TrackId, AudioSourceParams> sourceParamsChanged() const override;
     async::Channel<TrackId, AudioFxChain> fxChainParamsChanged() const override;
+    async::Channel<TrackId, AuxSendsParams> auxSendsParamsChanged() const override;
 
     // Input processing
     void processInput(const TrackId trackId) const override;
@@ -188,6 +189,7 @@ private:
 
     async::Channel<TrackId, AudioSourceParams> m_sourceParamsChanged;
     async::Channel<TrackId, AudioFxChain> m_fxChainParamsChanged;
+    async::Channel<TrackId, AuxSendsParams> m_auxSendsParamsChanged;
 
     // -----
     void onShouldProcessDuringSilenceChanged(const TrackId trackId, bool shouldProcess);

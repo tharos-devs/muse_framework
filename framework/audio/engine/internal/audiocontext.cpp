@@ -103,6 +103,7 @@ void AudioContext::deinit()
     m_saveSoundTracksProgress = SaveSoundTrackProgressData();
     m_sourceParamsChanged = async::Channel<TrackId, AudioSourceParams>();
     m_fxChainParamsChanged = async::Channel<TrackId, AudioFxChain>();
+    m_auxSendsParamsChanged = async::Channel<TrackId, AuxSendsParams>();
 
     async_disconnectAll();
 }
@@ -347,6 +348,7 @@ void AudioContext::onFxChainParamsChanged(Track& track, const AudioFxChain& para
     ONLY_AUDIO_ENGINE_THREAD;
 
     const TrackId trackId = track.id;
+
     std::shared_ptr<IPlayheadPosition> playheadPosition = std::static_pointer_cast<IPlayheadPosition>(m_player);
 
     // Make fx chain
@@ -385,6 +387,8 @@ void AudioContext::onAuxSendsParamsChanged(Track& track, const AuxSendsParams& p
     m_mixer->setAuxSends(track.id, params);
 
     track.params.auxSends = params;
+
+    m_auxSendsParamsChanged.send(track.id, params);
 }
 
 void AudioContext::removeTrack(const TrackId trackId)
@@ -600,6 +604,12 @@ async::Channel<TrackId, AudioFxChain> AudioContext::fxChainParamsChanged() const
 {
     ONLY_AUDIO_ENGINE_THREAD;
     return m_fxChainParamsChanged;
+}
+
+async::Channel<TrackId, AuxSendsParams> AudioContext::auxSendsParamsChanged() const
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+    return m_auxSendsParamsChanged;
 }
 
 void AudioContext::processInput(const TrackId trackId) const

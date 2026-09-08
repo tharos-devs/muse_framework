@@ -249,6 +249,10 @@ void StartAudioController::stopAudioProcessing()
         }
     });
 
+    using namespace std::chrono_literals;
+    static constexpr auto ENGINE_DEINIT_TIMEOUT = 3s;
+    auto deadline = std::chrono::steady_clock::now() + ENGINE_DEINIT_TIMEOUT;
+
     do {
         // Ensure that RPC process() is called at least once
         m_rpcChannel->process();
@@ -257,8 +261,23 @@ void StartAudioController::stopAudioProcessing()
             break;
         }
 
+        if (std::chrono::steady_clock::now() >= deadline) {
+            //! NOTE: the engine thread can get stuck during teardown (e.g. a VST3 plugin
+            //! misbehaving while its editor is still open) - give up waiting rather than
+            //! hanging app shutdown forever, and proceed to close the driver anyway
+            LOGW() << "timed out waiting for audio engine deinit, forcing shutdown to continue";
+
+            //! NOTE: the EngineDeinit response callback above is what normally clears this;
+            //! if we're giving up on that response ever arriving, clear it here too so
+            //! isAudioStarted() doesn't keep reporting stale state after a forced shutdown
+            if (m_isAudioStarted.val) {
+                m_isAudioStarted.set(false);
+            }
+
+            break;
+        }
+
         std::this_thread::yield();
-        using namespace std::chrono_literals;
         std::this_thread::sleep_for(10ms);
     } while (m_isAudioStarted.val);
 

@@ -30,7 +30,7 @@
 
 namespace muse::audio::engine {
 //! NOTE This is a thread for worker
-class GeneralAudioWorker
+class GeneralAudioWorker : public std::enable_shared_from_this<GeneralAudioWorker>
 {
 public:
     GeneralAudioWorker();

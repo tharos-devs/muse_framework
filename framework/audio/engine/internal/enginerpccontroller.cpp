@@ -466,6 +466,10 @@ void EngineRpcController::init()
             channel()->send(rpc::make_notification(ctxId, MsgCode::FxChainParamsChanged, RpcPacker::pack(trackId, params)));
         });
 
+        acontext->auxSendsParamsChanged().onReceive(this, [this, ctxId](TrackId trackId, const AuxSendsParams& params) {
+            channel()->send(rpc::make_notification(ctxId, MsgCode::AuxSendsParamsChanged, RpcPacker::pack(trackId, params)));
+        });
+
         acontext->sourceParamsChanged().onReceive(this, [this, ctxId](TrackId trackId, const AudioSourceParams& params) {
             channel()->send(rpc::make_notification(ctxId, MsgCode::SourceParamsChanged, RpcPacker::pack(trackId, params)));
         });

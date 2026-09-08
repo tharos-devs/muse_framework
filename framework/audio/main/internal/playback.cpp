@@ -87,6 +87,16 @@ async::Promise<Ret> Playback::init()
         }
     });
 
+    channel()->onNotification(ctxId(), MsgCode::AuxSendsParamsChanged, [this](const Msg& msg) {
+        ONLY_AUDIO_MAIN_THREAD;
+        TrackId trackId = 0;
+        AuxSendsParams params;
+        IF_ASSERT_FAILED(RpcPacker::unpack(msg.data, trackId, params)) {
+            return;
+        }
+        m_auxSendsParamsChanged.send(trackId, params);
+    });
+
     return async::make_promise<Ret>([this](auto resolve, auto /*reject*/) {
         ONLY_AUDIO_MAIN_THREAD;
 
@@ -455,6 +465,11 @@ async::Channel<TrackId, AudioSourceParams> Playback::sourceParamsChanged() const
 async::Channel<TrackId, AudioFxChain> Playback::fxChainParamsChanged() const
 {
     return m_fxChainParamsChanged;
+}
+
+async::Channel<TrackId, AuxSendsParams> Playback::auxSendsParamsChanged() const
+{
+    return m_auxSendsParamsChanged;
 }
 
 // Same for master

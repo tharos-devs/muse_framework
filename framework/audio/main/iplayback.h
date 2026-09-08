@@ -85,6 +85,7 @@ public:
     // These parameters can be changed within the audio system.
     virtual async::Channel<TrackId, AudioSourceParams> sourceParamsChanged() const = 0;
     virtual async::Channel<TrackId, AudioFxChain> fxChainParamsChanged() const = 0;
+    virtual async::Channel<TrackId, AuxSendsParams> auxSendsParamsChanged() const = 0;
 
     // Same for master
     virtual async::Promise<TrackParams> masterParams() const = 0;

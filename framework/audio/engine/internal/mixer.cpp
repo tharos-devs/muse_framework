@@ -37,6 +37,14 @@ using namespace muse::audio::engine;
 
 constexpr size_t MIN_TRACK_COUNT_FOR_MULTITHREADING = 2;
 
+//! NOTE: how much longer (in seconds) an aux bus keeps processing after the last track
+//! stops sending to it, so an fx tail (reverb, delay) can ring out and the level meter can
+//! settle, instead of being cut off abruptly. This is a flat heuristic, not a true
+//! per-plugin tail length (the engine has no generic way to query that from a VST3 plugin) -
+//! 6s comfortably covers most reverb/delay presets (including long hall/cathedral tails),
+//! but an unusually long one can still be truncated
+constexpr float AUX_SILENCE_GRACE_SECONDS = 6.f;
+
 Mixer::~Mixer()
 {
     ONLY_AUDIO_MAIN_OR_ENGINE_THREAD;
@@ -286,6 +294,19 @@ void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSiz
             continue;
         }
 
+        //! NOTE: an aux bus's buffer is filled from the outside (here), unlike a regular
+        //! track's, which only ever gets data from its own source node. Muting a bus only
+        //! disables its own processing chain (see AudioNode::process, which stops upstream
+        //! processing but does not zero the buffer) - for a regular track that correctly
+        //! leaves an already-zeroed buffer alone, but for an aux bus it would leave whatever
+        //! raw, unprocessed signal was written into it right here, which would still get
+        //! mixed into the output unmuted. So the mute must be honored on write, not just
+        //! inside the bus's own chain
+        AutomationControlNodePtr auxControl = aux.chain->control();
+        if (auxControl && auxControl->muted()) {
+            continue;
+        }
+
         const AuxSendParams& auxSend = auxSends.at(auxIdx);
         if (!auxSend.active || muse::is_zero(auxSend.signalAmount)) {
             continue;
@@ -299,6 +320,7 @@ void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSiz
         }
 
         aux.processed = true;
+        aux.silenceGraceSamplesLeft = static_cast<samples_t>(AUX_SILENCE_GRACE_SECONDS * m_outputSpec.sampleRate);
     }
 }
 
@@ -307,18 +329,33 @@ void Mixer::processAuxChannels(float* buffer, samples_t samplesPerChannel)
     const size_t outBufferSize = samplesPerChannel * m_outputSpec.audioChannelCount;
 
     for (TrackData& aux : m_auxTracks) {
-        if (!aux.processed) {
+        if (!aux.chain->fxChain()) {
             continue;
+        }
+
+        //! NOTE: if nothing was written to this bus this cycle, keep processing it (with
+        //! silence) for a bounded grace period rather than stopping immediately. This lets
+        //! an fx tail - a reverb, say - ring out instead of being cut off abruptly, and gives
+        //! the level meter a chance to actually settle down to silence instead of freezing at
+        //! its last non-zero reading. The period is bounded (rather than "until the signal
+        //! node confirms silence") so a fx that never produces an exact zero output - a very
+        //! common case: denormal noise, a plugin's own noise floor, etc. - can't force this
+        //! bus to keep processing indefinitely
+        if (!aux.processed) {
+            if (aux.silenceGraceSamplesLeft == 0) {
+                continue;
+            }
+
+            aux.silenceGraceSamplesLeft -= std::min(aux.silenceGraceSamplesLeft, static_cast<samples_t>(samplesPerChannel));
         }
 
         float* auxBuffer = aux.buffer.data();
         aux.chain->process(auxBuffer, samplesPerChannel);
 
         //! NOTE If the signal is silent, do not write to the output buffer
-        if (auto signal = aux.chain->signal()) {
-            if (!signal->isSilent()) {
-                mixOutputFromChannel(buffer, auxBuffer, outBufferSize);
-            }
+        SignalNodePtr signal = aux.chain->signal();
+        if (signal && !signal->isSilent()) {
+            mixOutputFromChannel(buffer, auxBuffer, outBufferSize);
         }
     }
 }
