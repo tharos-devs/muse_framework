@@ -56,8 +56,13 @@ GeneralAudioWorker::~GeneralAudioWorker()
 
 void GeneralAudioWorker::run(Callback callback)
 {
-    m_thread = std::make_unique<std::thread>([this, callback]() {
-        th_main(callback);
+    //! NOTE: capture a shared_ptr to this (not a raw this) so that if stop() ever has to
+    //! abandon this thread after its timeout, the thread itself keeps this object alive
+    //! for as long as it keeps running - th_main() reads/writes several of this object's
+    //! members, which would otherwise be a use-after-free once the owner drops its own
+    //! (only) shared_ptr reference
+    m_thread = std::make_unique<std::thread>([self = shared_from_this(), callback]() {
+        self->th_main(callback);
     });
 
     if (!muse::setThreadPriority(*m_thread, ThreadPriority::High)) {
