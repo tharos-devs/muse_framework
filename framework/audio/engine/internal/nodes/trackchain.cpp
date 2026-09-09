@@ -45,6 +45,9 @@ void TrackChain::rebuild()
     if (m_fxChain) {
         doAdd(m_fxChain);
     }
+    if (m_gain) {
+        doAdd(m_gain);
+    }
     if (m_source) {
         doAdd(m_source);
     }
@@ -82,6 +85,17 @@ void TrackChain::setFxChain(FxChainPtr fxChain)
 FxChainPtr TrackChain::fxChain() const
 {
     return m_fxChain;
+}
+
+void TrackChain::setGain(GainNodePtr gainNode)
+{
+    clear();
+    m_gain = gainNode;
+}
+
+GainNodePtr TrackChain::gain() const
+{
+    return m_gain;
 }
 
 void TrackChain::setControl(AutomationControlNodePtr controlNode)

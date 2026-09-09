@@ -431,17 +431,23 @@ static constexpr volume_db_t VOLUME_DB_MIN = volume_db_t::make(-60.f);
 static constexpr volume_db_t VOLUME_DB_MAX = volume_db_t::make(12.f);
 static constexpr balance_t BALANCE_MIN = balance_t::make(-1.f);
 static constexpr balance_t BALANCE_MAX = balance_t::make(1.f);
+static constexpr volume_db_t GAIN_DB_MIN = volume_db_t::make(-24.f);
+static constexpr volume_db_t GAIN_DB_MAX = volume_db_t::make(24.f);
 
 struct ControlParams {
     AutomatableValue<volume_db_t> volume;
     AutomatableValue<balance_t> balance;
+    //! NOTE Unlike volume/balance (applied post-FX, see TrackChain::rebuild()), gain is a flat
+    //! input trim applied pre-FX - it has no automation support, hence a plain value here
+    volume_db_t gain = 0.f;
     bool muted = false;
 
     bool operator ==(const ControlParams& other) const
     {
         return muted == other.muted
                && volume == other.volume
-               && balance == other.balance;
+               && balance == other.balance
+               && gain == other.gain;
     }
 
     bool operator !=(const ControlParams& other) const
