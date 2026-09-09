@@ -195,11 +195,13 @@ TEST_F(Audio_RpcPackerTests, ControlParams)
     origin.volume = volume_db_t(0.6f);
     origin.balance = balance_t(0.5f);
     origin.muted = true;
+    origin.gain = volume_db_t(3.f);
 
     KNOWN_FIELDS(origin,
                  origin.volume,
                  origin.balance,
-                 origin.muted);
+                 origin.muted,
+                 origin.gain);
 
     ByteArray data = rpc::RpcPacker::pack(origin);
 

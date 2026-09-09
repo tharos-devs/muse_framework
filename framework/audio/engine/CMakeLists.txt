@@ -96,6 +96,8 @@ else()
         internal/nodes/automationcontrolnode.h
         internal/nodes/controlnode.cpp
         internal/nodes/controlnode.h
+        internal/nodes/gainnode.cpp
+        internal/nodes/gainnode.h
         internal/nodes/signalnode.cpp
         internal/nodes/signalnode.h
         internal/nodes/playheadnode.cpp
