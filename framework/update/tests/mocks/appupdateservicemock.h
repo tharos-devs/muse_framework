@@ -36,6 +36,7 @@ public:
 
     MOCK_METHOD(bool, isReleaseDownloaded, (), (const, override));
     MOCK_METHOD(muse::io::path_t, downloadedReleasePath, (), (const, override));
+    MOCK_METHOD(void, removeDownloadedRelease, (), (override));
 
     MOCK_METHOD(bool, canAutoInstall, (), (const, override));
 

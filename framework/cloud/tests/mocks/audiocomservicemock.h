@@ -2,10 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  * MuseScore-CLA-applies
  *
- * MuseScore Studio
+ * MuseScore
  * Music Composition & Notation
  *
- * Copyright (C) 2025 MuseScore Limited and others
+ * Copyright (C) 2026 MuseScore BVBA and others
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 3 as
@@ -22,22 +22,21 @@
 
 #pragma once
 
-#include "types/ret.h"
+#include <gmock/gmock.h>
 
-namespace muse::update {
-enum class Err {
-    Undefined       = int(muse::Ret::Code::Undefined),
-    NoError         = int(muse::Ret::Code::Ok),
-    UnknownError    = int(muse::Ret::Code::UpdateFirst),
+#include "cloud/audiocom/iaudiocomservice.h"
 
-    NoUpdate,
-    NetworkError,
-    ReleaseInfoParseError,
-    NotEnoughDiskSpace,
-};
-
-inline muse::Ret make_ret(Err e, const std::string& text = {})
+namespace muse::cloud {
+class AudioComServiceMock : public IAudioComService
 {
-    return muse::Ret(static_cast<int>(e), text);
-}
+public:
+    MOCK_METHOD(IAuthorizationServicePtr, authorization, (), (override));
+    MOCK_METHOD(QUrl, projectManagerUrl, (), (const, override));
+
+    MOCK_METHOD(ProgressPtr, uploadAudio,
+                (DevicePtr audioData, const QString& audioFormat, const QString& title, const QUrl& existingUrl, Visibility visibility,
+                 bool replaceExisting), (override));
+
+    MOCK_METHOD(CloudInfo, cloudInfo, (), (const, override));
+};
 }

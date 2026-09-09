@@ -29,19 +29,18 @@ using ::testing::Return;
 
 #include "framework/network/networktypes.h"
 
-#include "mocks/updateconfigurationmock.h"
-#include "network/tests/mocks/networkmanagercreatormock.h"
-#include "network/tests/mocks/networkmanagermock.h"
 #include "global/tests/mocks/systeminfomock.h"
 #include "global/tests/mocks/filesystemmock.h"
+#include "global/tests/mocks/applicationmock.h"
+#include "network/tests/mocks/networkmanagercreatormock.h"
+#include "network/tests/mocks/networkmanagermock.h"
+#include "mocks/updateconfigurationmock.h"
+#include "mocks/updateinstallermock.h"
 
 #include "update/internal/appupdateservice.h"
-
-#include "modularity/ioc.h"
-#include "global/iapplication.h"
+#include "update/updateerrors.h"
 
 #include "async/processevents.h"
-#include "async/async.h"
 
 using namespace muse;
 using namespace muse::update;
@@ -51,8 +50,6 @@ using namespace muse::network;
 namespace muse::update {
 class AppUpdateServiceTests : public ::testing::Test, public ::async::Asyncable
 {
-    muse::GlobalInject<muse::IApplication> application;
-
 public:
     void SetUp() override
     {
@@ -76,6 +73,17 @@ public:
 
         m_fileSystem = std::make_shared<NiceMock<io::FileSystemMock> >();
         m_service->fileSystem.set(m_fileSystem);
+
+        m_updateInstaller = std::make_shared<NiceMock<UpdateInstallerMock> >();
+        m_service->updateInstaller.set(m_updateInstaller);
+
+        m_application = std::make_shared<NiceMock<ApplicationMock> >();
+        m_service->application.set(m_application);
+
+        ON_CALL(*m_application, fullVersion())
+        .WillByDefault(Return(Version(CURRENT_VERSION)));
+        ON_CALL(*m_application, title())
+        .WillByDefault(Return(String(u"App")));
     }
 
     void TearDown() override
@@ -92,7 +100,7 @@ public:
         QString releasesNotes = "{"
                                 "\"tag_name\": \"v1000.0\","
                                 "\"assets\": ["
-                                "{ \"name\": \"MuseScore.dmg\", \"browser_download_url\": \"blabla\" },"
+                                "{ \"name\": \"MuseScore.dmg\", \"browser_download_url\": \"blabla\", \"size\": 12345 },"
                                 "{ \"name\": \"MuseScore.zip\", \"browser_download_url\": \"blabla\" },"
                                 "{ \"name\": \"MuseScore.msi\", \"browser_download_url\": \"blabla\" },"
                                 "{ \"name\": \"MuseScore.AppImage\", \"browser_download_url\": \"blabla\" }"
@@ -128,7 +136,7 @@ public:
                                         "{ \"version\": \"%1\", \"notes\": \"blabla2\" },"
                                         "{ \"version\": \"0.4.1\", \"notes\": \"blabla1\" }"
                                         "]"
-                                        "}").arg(application()->fullVersion().toString());
+                                        "}").arg(CURRENT_VERSION);
 
         EXPECT_CALL(*m_networkManager, get(QUrl(QString::fromStdString(previousAppReleasesNotesUrl)), _, _))
         .WillOnce(testing::Invoke(
@@ -143,12 +151,14 @@ public:
 
     //! [GIVEN] An available release is ready to be downloaded.
     void givenAvailableRelease(const std::string& fileName = "MuseScore.dmg",
-                               const std::string& dataPath = "/tmp/upd")
+                               const std::string& dataPath = "upd",
+                               uint64_t fileSize = 0)
     {
         ReleaseInfo info;
         info.version = "1000.0";
         info.fileName = fileName;
-        info.fileUrl = "http://test/" + fileName;
+        info.fileUrl = "package-url";
+        info.fileSize = fileSize;
         m_service->m_lastCheckResult = RetVal<ReleaseInfo>::make_ok(info);
 
         ON_CALL(*m_configuration, updateDataPath())
@@ -161,12 +171,16 @@ public:
         .WillByDefault(Return(muse::make_ok()));
     }
 
+    static constexpr const char* CURRENT_VERSION = "4.0.0";
+
     AppUpdateService* m_service = nullptr;
     std::shared_ptr<UpdateConfigurationMock> m_configuration;
     std::shared_ptr<muse::network::NetworkManagerCreatorMock> m_networkManagerCreator;
     std::shared_ptr<muse::network::NetworkManagerMock> m_networkManager;
     std::shared_ptr<SystemInfoMock> m_systemInfoMock;
     std::shared_ptr<io::FileSystemMock> m_fileSystem;
+    std::shared_ptr<UpdateInstallerMock> m_updateInstaller;
+    std::shared_ptr<ApplicationMock> m_application;
     Progress m_getReleaseInfoProgress;
     Progress m_getPrevReleasesInfoProgress;
     Progress m_downloadProgress;
@@ -369,6 +383,7 @@ TEST_F(AppUpdateServiceTests, ParseRelease_MacOS)
     //! [THEN] Should return correct release file
     EXPECT_TRUE(retVal.ret);
     EXPECT_EQ(retVal.val.fileName, "MuseScore.dmg");
+    EXPECT_EQ(retVal.val.fileSize, 12345u);
 }
 
 TEST_F(AppUpdateServiceTests, CheckForUpdate_ReleasesNotes)
@@ -459,8 +474,8 @@ TEST_F(AppUpdateServiceTests, DownloadRelease_Success_PromotesPartialToFinal)
     }));
 
     //! [THEN] On success the partial file is promoted to the final package name
-    EXPECT_CALL(*m_fileSystem, move(io::path_t("/tmp/upd/MuseScore.dmg.part"),
-                                    io::path_t("/tmp/upd/MuseScore.dmg"), true))
+    EXPECT_CALL(*m_fileSystem, move(io::path_t("upd/MuseScore.dmg.part"),
+                                    io::path_t("upd/MuseScore.dmg"), true))
     .WillOnce(Return(muse::make_ok()));
 
     m_service->downloadRelease();
@@ -519,7 +534,7 @@ TEST_F(AppUpdateServiceTests, DownloadRelease_RangeNotHonoured_DiscardsPartial)
     }));
 
     //! [THEN] The now-stale partial file is removed so the next attempt starts clean
-    EXPECT_CALL(*m_fileSystem, remove(io::path_t("/tmp/upd/MuseScore.dmg.part"), false))
+    EXPECT_CALL(*m_fileSystem, remove(io::path_t("upd/MuseScore.dmg.part"), false))
     .WillOnce(Return(muse::make_ok()));
 
     m_service->downloadRelease();
@@ -528,4 +543,207 @@ TEST_F(AppUpdateServiceTests, DownloadRelease_RangeNotHonoured_DiscardsPartial)
     ProgressResult res = ProgressResult::make_ok(Val());
     res.ret.setData("status", 200);
     m_downloadProgress.finish(res);
+}
+
+TEST_F(AppUpdateServiceTests, DownloadRelease_NotEnoughDiskSpace_DoesNotStart)
+{
+    //! [GIVEN] A 100 MB release and only 50 MB available where it would be stored
+    const uint64_t mb = 1024 * 1024;
+    givenAvailableRelease("MuseScore.dmg", "upd", 100 * mb);
+    ON_CALL(*m_fileSystem, exists(_))
+    .WillByDefault(Return(Ret(false)));
+    ON_CALL(*m_fileSystem, availableSpace(io::path_t("upd")))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(50 * mb)));
+
+    //! [THEN] No network request is made
+    EXPECT_CALL(*m_networkManager, get(_, _, _))
+    .Times(0);
+
+    //! [WHEN] Download the release
+    RetVal<Progress> rv = m_service->downloadRelease();
+
+    //! [THEN] The download is refused with a disk space error naming the missing amount
+    //! (100 MB package + 100 MB reserve - 50 MB available = 150 MB)
+    EXPECT_EQ(rv.ret.code(), static_cast<int>(Err::NotEnoughDiskSpace));
+    EXPECT_NE(rv.ret.text().find("150 MB"), std::string::npos);
+}
+
+TEST_F(AppUpdateServiceTests, DownloadRelease_EnoughDiskSpace_Starts)
+{
+    //! [GIVEN] A 100 MB release and plenty of space available
+    const uint64_t mb = 1024 * 1024;
+    givenAvailableRelease("MuseScore.dmg", "upd", 100 * mb);
+    ON_CALL(*m_fileSystem, exists(_))
+    .WillByDefault(Return(Ret(false)));
+    ON_CALL(*m_fileSystem, availableSpace(io::path_t("upd")))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(10000 * mb)));
+
+    //! [THEN] The download is started
+    EXPECT_CALL(*m_networkManager, get(_, _, _))
+    .WillOnce(testing::Invoke([this](const QUrl&, IncomingDevicePtr, const RequestHeaders&) {
+        return RetVal<Progress>::make_ok(m_downloadProgress);
+    }));
+
+    //! [WHEN] Download the release
+    RetVal<Progress> rv = m_service->downloadRelease();
+    EXPECT_TRUE(rv.ret);
+}
+
+TEST_F(AppUpdateServiceTests, DownloadRelease_UnknownPackageSize_SkipsDiskSpaceCheck)
+{
+    //! [GIVEN] The release has no size information and the disk is nearly full
+    givenAvailableRelease("MuseScore.dmg", "upd", 0);
+    ON_CALL(*m_fileSystem, exists(_))
+    .WillByDefault(Return(Ret(false)));
+    ON_CALL(*m_fileSystem, availableSpace(_))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(static_cast<uint64_t>(1))));
+
+    //! [THEN] The download is still started
+    EXPECT_CALL(*m_networkManager, get(_, _, _))
+    .WillOnce(testing::Invoke([this](const QUrl&, IncomingDevicePtr, const RequestHeaders&) {
+        return RetVal<Progress>::make_ok(m_downloadProgress);
+    }));
+
+    //! [WHEN] Download the release
+    RetVal<Progress> rv = m_service->downloadRelease();
+    EXPECT_TRUE(rv.ret);
+}
+
+TEST_F(AppUpdateServiceTests, DownloadRelease_AbsurdPackageSize_Rejected)
+{
+    //! [GIVEN] The server reports a package size far beyond anything real
+    //! (3 * size would wrap around uint64_t to 2 bytes)
+    givenAvailableRelease("MuseScore.dmg", "upd", 6148914691236517206ull);
+    ON_CALL(*m_fileSystem, exists(_))
+    .WillByDefault(Return(Ret(false)));
+    ON_CALL(*m_fileSystem, availableSpace(_))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(10000ull * 1024 * 1024)));
+
+    //! [THEN] No network request is made
+    EXPECT_CALL(*m_networkManager, get(_, _, _))
+    .Times(0);
+
+    //! [WHEN] Download the release
+    RetVal<Progress> rv = m_service->downloadRelease();
+
+    //! [THEN] The download is refused
+    EXPECT_EQ(rv.ret.code(), static_cast<int>(Err::NotEnoughDiskSpace));
+}
+
+TEST_F(AppUpdateServiceTests, DownloadRelease_Resume_OnlyRemainingBytesRequired)
+{
+    //! [GIVEN] A 100 MB release, 90 MB already downloaded, and 120 MB available
+    //! (enough for the remaining 10 MB plus the reserve, but not for the whole file)
+    const uint64_t mb = 1024 * 1024;
+    givenAvailableRelease("MuseScore.dmg", "upd", 100 * mb);
+    ON_CALL(*m_fileSystem, exists(_))
+    .WillByDefault(Return(Ret(true)));
+    ON_CALL(*m_fileSystem, fileSize(_))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(90 * mb)));
+    ON_CALL(*m_fileSystem, availableSpace(io::path_t("upd")))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(120 * mb)));
+
+    //! [THEN] The download is resumed
+    EXPECT_CALL(*m_networkManager, get(_, _, _))
+    .WillOnce(testing::Invoke([this](const QUrl&, IncomingDevicePtr, const RequestHeaders&) {
+        return RetVal<Progress>::make_ok(m_downloadProgress);
+    }));
+
+    //! [WHEN] Download the release
+    RetVal<Progress> rv = m_service->downloadRelease();
+    EXPECT_TRUE(rv.ret);
+}
+
+TEST_F(AppUpdateServiceTests, PrepareUpdate_NotEnoughDiskSpace_DoesNotStage)
+{
+    //! [GIVEN] A downloaded 100 MB package and only 150 MB left in the update data dir
+    const uint64_t mb = 1024 * 1024;
+    const io::path_t package("upd/MuseScore.dmg");
+    ON_CALL(*m_configuration, updateDataPath())
+    .WillByDefault(Return(io::path_t("upd")));
+    ON_CALL(*m_fileSystem, fileSize(package))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(100 * mb)));
+    ON_CALL(*m_fileSystem, availableSpace(io::path_t("upd")))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(150 * mb)));
+
+    //! [THEN] The installer is not asked to stage anything
+    EXPECT_CALL(*m_updateInstaller, prepareUpdate(_))
+    .Times(0);
+
+    //! [WHEN] Prepare the update
+    RetVal<io::path_t> rv = m_service->prepareUpdate(package);
+
+    //! [THEN] It fails with a disk space error
+    EXPECT_EQ(rv.ret.code(), static_cast<int>(Err::NotEnoughDiskSpace));
+}
+
+TEST_F(AppUpdateServiceTests, PrepareUpdate_EnoughDiskSpace_Stages)
+{
+    //! [GIVEN] A downloaded 100 MB package and plenty of space in the update data dir
+    const uint64_t mb = 1024 * 1024;
+    const io::path_t package("upd/MuseScore.dmg");
+    ON_CALL(*m_configuration, updateDataPath())
+    .WillByDefault(Return(io::path_t("upd")));
+    ON_CALL(*m_fileSystem, fileSize(package))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(100 * mb)));
+    ON_CALL(*m_fileSystem, availableSpace(io::path_t("upd")))
+    .WillByDefault(Return(RetVal<uint64_t>::make_ok(10000 * mb)));
+
+    //! [THEN] The installer stages the package
+    EXPECT_CALL(*m_updateInstaller, prepareUpdate(package))
+    .WillOnce(Return(RetVal<io::path_t>::make_ok(io::path_t("upd/staging/MuseScore.app"))));
+
+    //! [WHEN] Prepare the update
+    RetVal<io::path_t> rv = m_service->prepareUpdate(package);
+    EXPECT_TRUE(rv.ret);
+}
+
+TEST_F(AppUpdateServiceTests, RemoveDownloadedRelease_RemovesPackageAndPartial)
+{
+    //! [GIVEN] A release whose package was recorded as downloaded
+    givenAvailableRelease();
+    ON_CALL(*m_configuration, lastDownloadedPackagePath())
+    .WillByDefault(Return(io::path_t("upd/MuseScore.dmg")));
+    ON_CALL(*m_fileSystem, exists(_))
+    .WillByDefault(Return(Ret(false)));
+
+    //! [THEN] Both the package and its partial file are removed and the record is cleared
+    EXPECT_CALL(*m_fileSystem, remove(io::path_t("upd/MuseScore.dmg"), false))
+    .WillOnce(Return(muse::make_ok()));
+    EXPECT_CALL(*m_fileSystem, remove(io::path_t("upd/MuseScore.dmg.part"), false))
+    .WillOnce(Return(muse::make_ok()));
+    EXPECT_CALL(*m_configuration, setLastDownloadedPackagePath(io::path_t()));
+
+    //! [WHEN] The release is removed
+    m_service->removeDownloadedRelease();
+}
+
+TEST_F(AppUpdateServiceTests, RemoveDownloadedRelease_WhileDownloading_CancelsDownload)
+{
+    //! [GIVEN] A download is in progress
+    givenAvailableRelease();
+    ON_CALL(*m_fileSystem, exists(_))
+    .WillByDefault(Return(Ret(false)));
+    EXPECT_CALL(*m_networkManager, get(_, _, _))
+    .WillOnce(testing::Invoke([this](const QUrl&, IncomingDevicePtr, const RequestHeaders&) {
+        return RetVal<Progress>::make_ok(m_downloadProgress);
+    }));
+
+    RetVal<Progress> rv = m_service->downloadRelease();
+    ASSERT_TRUE(rv.ret);
+
+    bool canceled = false;
+    m_downloadProgress.canceled().onNotify(this, [&canceled]() { canceled = true; });
+
+    //! [WHEN] The release is removed
+    m_service->removeDownloadedRelease();
+
+    //! [THEN] The network request is canceled and a new download may be started
+    EXPECT_TRUE(canceled);
+
+    EXPECT_CALL(*m_networkManager, get(_, _, _))
+    .WillOnce(testing::Invoke([this](const QUrl&, IncomingDevicePtr, const RequestHeaders&) {
+        return RetVal<Progress>::make_ok(m_downloadProgress);
+    }));
+    EXPECT_TRUE(m_service->downloadRelease().ret);
 }

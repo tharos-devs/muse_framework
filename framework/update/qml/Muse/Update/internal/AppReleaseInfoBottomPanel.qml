@@ -86,7 +86,7 @@ RowLayout {
 
         Layout.alignment: Qt.AlignVCenter
 
-        text: qsTrc("update", "Install update")
+        text: qsTrc("update", "Update now")
         icon: IconCode.IMPORT
 
         accentButton: true

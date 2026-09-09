@@ -95,7 +95,7 @@ StyledDialogView {
                 visible: root.readyToInstall
 
                 text: qsTrc("update", "%1 has downloaded an update and is ready to install. "
-                                      + "A restart will be required to complete the installation. "
+                                      + "%1 will restart to complete the installation. "
                                       + "If you have any unsaved changes, you will be prompted to save them first.")
                       .arg(root.appName)
                 horizontalAlignment: Qt.AlignLeft

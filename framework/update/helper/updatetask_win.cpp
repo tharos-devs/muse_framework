@@ -98,11 +98,11 @@ void logLine(const std::wstring& message)
     ::FlushFileBuffers(g_logFile);
 }
 
-void openLog(const std::wstring& appId)
+void openLog(const std::wstring& appId, bool truncate)
 {
     const std::wstring path = shared::logFilePath(appId);
-    g_logFile = ::CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
-                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    g_logFile = ::CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                              truncate ? CREATE_ALWAYS : OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
 void closeLog()
@@ -1692,7 +1692,7 @@ int runCommandLine()
     //! NOTE: Secured before the log is opened - every one of these commands runs
     //! privileged, and the log lives in that same directory.
     ensureSecureRoot(appId);
-    openLog(appId);
+    openLog(appId, isApply);
 
     int returnCode = 1;
 

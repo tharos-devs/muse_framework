@@ -43,6 +43,7 @@ public:
     muse::io::EntryType entryType(const muse::io::path_t& path) const override;
 
     muse::RetVal<uint64_t> fileSize(const muse::io::path_t& path) const override;
+    muse::RetVal<uint64_t> availableSpace(const muse::io::path_t& path) const override;
 
     muse::RetVal<muse::io::paths_t> scanFiles(const muse::io::path_t& rootDir, const std::vector<std::string>& filters,
                                               muse::io::ScanMode mode = muse::io::ScanMode::FilesInCurrentDirAndSubdirs) const override;

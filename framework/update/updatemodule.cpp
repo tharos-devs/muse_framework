@@ -95,6 +95,10 @@ void UpdateModule::resolveImports()
 void UpdateModule::onInit(const IApplication::RunMode&)
 {
     m_configuration->init();
+
+#if defined(Q_OS_WIN)
+    std::static_pointer_cast<WinUpdateInstaller>(m_updateInstaller)->importHelperLog();
+#endif
 }
 
 IContextSetup* UpdateModule::newContext(const muse::modularity::ContextPtr& ctx) const
@@ -130,5 +134,6 @@ void UpdateContext::resolveImports()
 void UpdateContext::onInit(const IApplication::RunMode&)
 {
     m_appUpdateService->init();
+    m_appUpdateScenario->init();
     m_actionController->init();
 }

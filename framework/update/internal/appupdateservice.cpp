@@ -50,6 +50,13 @@ const QString PREVIOUS_REQUEST_DAY_KEY("Previous-Request-Day");
 
 static const std::string PARTIAL_SUFFIX(".part");
 
+//! NOTE: In-place install unpacks the package next to it, so reserve room for
+//! the unpacked app on top of the package itself.
+static constexpr uint64_t UNPACK_SIZE_FACTOR = 2;
+static constexpr uint64_t DISK_SPACE_RESERVE = 100ull * 1024 * 1024;
+
+static constexpr uint64_t MAX_PACKAGE_SIZE = 500ull * 1024 * 1024;
+
 static QDate calculateWeekBeginForDate(const QDate& date)
 {
     // 1 (Monday) + 6 mod 7 = 0
@@ -123,10 +130,6 @@ Promise<RetVal<ReleaseInfo> > AppUpdateService::checkForUpdate()
 {
     return Promise<RetVal<ReleaseInfo> >([this](auto resolve, auto) {
         clear();
-
-        if (configuration()->checkForUpdateTestMode()) {
-            return resolve(m_lastCheckResult);
-        }
 
         if (!m_networkManager) {
             m_networkManager = networkManagerCreator()->makeNetworkManager();
@@ -249,8 +252,6 @@ RetVal<Progress> AppUpdateService::downloadRelease()
     const path_t partialPath = finalPath + PARTIAL_SUFFIX;
     fileSystem()->makePath(muse::io::absoluteDirpath(partialPath));
 
-    configuration()->setLastDownloadedPackagePath(finalPath);
-
     //! NOTE: Resume an interrupted download by appending to the partial file and
     //! requesting the remaining bytes via a Range header.
     uint64_t offset = 0;
@@ -258,6 +259,13 @@ RetVal<Progress> AppUpdateService::downloadRelease()
         RetVal<uint64_t> sz = fileSystem()->fileSize(partialPath);
         offset = sz.ret ? sz.val : 0;
     }
+
+    Ret spaceRet = checkDiskSpace(DiskSpaceFor::Download, info.fileSize, offset);
+    if (!spaceRet) {
+        return RetVal<Progress>::make_ret(spaceRet);
+    }
+
+    configuration()->setLastDownloadedPackagePath(finalPath);
 
     RequestHeaders headers;
     io::IODevice::OpenMode mode = io::IODevice::WriteOnly;
@@ -320,6 +328,54 @@ RetVal<Progress> AppUpdateService::downloadRelease()
     }, Asyncable::Mode::SetReplace);
 
     return RetVal<Progress>::make_ok(m_updateProgress);
+}
+
+Ret AppUpdateService::checkDiskSpace(DiskSpaceFor purpose, uint64_t packageSize, uint64_t downloadedBytes) const
+{
+    if (packageSize == 0) {
+        return make_ok();
+    }
+
+    if (packageSize > MAX_PACKAGE_SIZE) {
+        LOGW() << "package size is not sane: " << packageSize;
+        return make_ret(Err::NotEnoughDiskSpace);
+    }
+
+    io::path_t dir;
+    uint64_t required = DISK_SPACE_RESERVE;
+
+    switch (purpose) {
+    case DiskSpaceFor::Download:
+        dir = packagesDir();
+        required += packageSize - std::min(downloadedBytes, packageSize);
+        if (canAutoInstall()) {
+            required += packageSize * UNPACK_SIZE_FACTOR;
+        }
+        break;
+    case DiskSpaceFor::Unpack:
+        dir = configuration()->updateDataPath();
+        required += packageSize * UNPACK_SIZE_FACTOR;
+        break;
+    }
+
+    RetVal<uint64_t> available = fileSystem()->availableSpace(dir);
+    if (!available.ret) {
+        LOGW() << "failed to query available disk space: " << available.ret.toString();
+        return make_ok();
+    }
+
+    if (available.val >= required) {
+        return make_ok();
+    }
+
+    LOGW() << "not enough disk space for update: required " << required << " bytes, available " << available.val;
+
+    const uint64_t mb = 1024 * 1024;
+    const uint64_t missingMb = (required - available.val + mb - 1) / mb;
+    const std::string text = muse::qtrc("update", "Free up at least %1 MB of disk space and try again.")
+                             .arg(QString::number(static_cast<qulonglong>(missingMb))).toStdString();
+
+    return make_ret(Err::NotEnoughDiskSpace, text);
 }
 
 RequestHeaders AppUpdateService::prepareHeaders(const UpdateRequestHistory& history) const
@@ -403,6 +459,7 @@ RetVal<ReleaseInfo> AppUpdateService::parseRelease(const QByteArray& json) const
     result.ret = muse::make_ok();
     result.val.fileName = assetObj.value("name").toString().toStdString();
     result.val.fileUrl = assetObj.value("browser_download_url").toString().toStdString();
+    result.val.fileSize = static_cast<uint64_t>(std::max<qint64>(assetObj.value("size").toInteger(), 0));
     result.val.version = version.toStdString();
     result.val.notes = release.value("bodyMarkdown").toString().toStdString();
 
@@ -458,15 +515,17 @@ QJsonObject AppUpdateService::resolveReleaseAsset(const QJsonObject& release) co
 
 bool AppUpdateService::canAutoInstall() const
 {
-    if (!configuration()->autoInstallEnabled()) {
-        return false;
-    }
-
     return updateInstaller()->isInPlaceUpdateSupported();
 }
 
 RetVal<muse::io::path_t> AppUpdateService::prepareUpdate(const muse::io::path_t& packagePath)
 {
+    RetVal<uint64_t> packageSize = fileSystem()->fileSize(packagePath);
+    Ret ret = checkDiskSpace(DiskSpaceFor::Unpack, packageSize.ret ? packageSize.val : 0);
+    if (!ret) {
+        return RetVal<muse::io::path_t>(ret);
+    }
+
     return updateInstaller()->prepareUpdate(packagePath);
 }
 
@@ -619,6 +678,15 @@ io::path_t AppUpdateService::downloadedReleasePath() const
     }
 
     return path;
+}
+
+void AppUpdateService::removeDownloadedRelease()
+{
+    if (m_downloadInProgress) {
+        m_updateProgress.cancel();
+    }
+
+    cleanupStalePackages(/*keepFileName*/ std::string());
 }
 
 io::path_t AppUpdateService::packagesDir() const

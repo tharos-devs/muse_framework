@@ -24,6 +24,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
+#include <QStorageInfo>
 #include <QDirListing>
 
 #ifdef Q_OS_WIN
@@ -276,6 +277,16 @@ RetVal<uint64_t> FileSystem::fileSize(const io::path_t& path) const
     QFileInfo fi(path.toQString());
     rv.val = static_cast<uint64_t>(fi.size());
     return rv;
+}
+
+RetVal<uint64_t> FileSystem::availableSpace(const io::path_t& path) const
+{
+    QStorageInfo storage(path.toQString());
+    if (!storage.isValid() || !storage.isReady()) {
+        return RetVal<uint64_t>(make_ret(Err::FSNotExist));
+    }
+
+    return RetVal<uint64_t>::make_ok(static_cast<uint64_t>(storage.bytesAvailable()));
 }
 
 RetVal<io::paths_t> FileSystem::scanFiles(const io::path_t& rootDir, const std::vector<std::string>& nameFilters, ScanMode mode) const

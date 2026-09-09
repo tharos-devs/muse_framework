@@ -187,7 +187,7 @@ Ret LinuxUpdateInstaller::finalizeUpdate(const muse::io::path_t& preparedPath, c
 
     // 2. Spawn the detached helper. It waits for us to quit, replaces the
     //    AppImage and relaunches it.
-    const QString logPath = configuration()->updateDataPath().toQString() + "/museupdater.log";
+    const QString logPath = configuration()->helperLogPath().toQString();
     const QStringList args = {
         "--wait-pid", QString::number(QCoreApplication::applicationPid()),
         "--src", package,

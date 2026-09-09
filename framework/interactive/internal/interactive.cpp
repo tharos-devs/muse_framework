@@ -655,6 +655,7 @@ RetVal<Val> Interactive::openSync(const UriQuery& q)
 
     RetVal<Val> rv;
     QEventLoop loop;
+    bool finished = false;
     Promise<Val>::Resolve resolve;
     Promise<Val>::Reject reject;
     Promise<Val> promise = async::make_promise<Val>([&resolve, &reject](auto res, auto rej) {
@@ -663,14 +664,16 @@ RetVal<Val> Interactive::openSync(const UriQuery& q)
         return Promise<Val>::Result::unchecked();
     }, PromiseType::AsyncByBody);
 
-    promise.onResolve(this, [&rv, &loop](const Val& val) {
+    promise.onResolve(this, [&rv, &loop, &finished](const Val& val) {
         rv = RetVal<Val>::make_ok(val);
+        finished = true;
         loop.quit();
     });
 
-    promise.onReject(this, [&rv, &loop](int code, const std::string& err) {
+    promise.onReject(this, [&rv, &loop, &finished](int code, const std::string& err) {
         LOGE() << code << " " << err;
         rv.ret = make_ret(code, err);
+        finished = true;
         loop.quit();
     });
 
@@ -680,6 +683,12 @@ RetVal<Val> Interactive::openSync(const UriQuery& q)
     ContainerMeta openMeta = uriRegister()->meta(q.uri());
     if (openMeta.type == ContainerMeta::PrimaryPage) {
         LOGW() << "Primary pages should not open in synchronous mode, please fix this.";
+        return rv;
+    }
+
+    //! NOTE: The dialog may have finished synchronously while opening (e.g. it
+    //! closed itself on load); quit() before exec() is lost, so don't enter the loop.
+    if (finished) {
         return rv;
     }
 
@@ -1086,6 +1095,7 @@ Ret Interactive::toRet(const QVariant& jsr) const
 
     Ret ret;
     ret.setCode(jsobj.value("errcode").toInt());
+    ret.setText(jsobj.value("text").toString().toStdString());
     return ret;
 }
 

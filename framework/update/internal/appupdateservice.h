@@ -64,6 +64,7 @@ public:
 
     bool isReleaseDownloaded() const override;
     muse::io::path_t downloadedReleasePath() const override;
+    void removeDownloadedRelease() override;
 
 private:
     friend class AppUpdateServiceTests;
@@ -79,6 +80,12 @@ private:
     Ret writeUpdateRequestHistory(const io::path_t& path, const UpdateRequestHistory& updateRequestHistory);
 
     RetVal<ReleaseInfo> parseRelease(const QByteArray& json) const;
+
+    enum class DiskSpaceFor {
+        Download,   //!< package (minus already downloaded bytes) + unpack room if auto-install
+        Unpack      //!< staging of an already downloaded package
+    };
+    Ret checkDiskSpace(DiskSpaceFor purpose, uint64_t packageSize, uint64_t downloadedBytes = 0) const;
 
     InstallProgressUi makeInstallProgressUi() const;
 

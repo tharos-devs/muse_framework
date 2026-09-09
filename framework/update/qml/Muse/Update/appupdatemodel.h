@@ -57,7 +57,7 @@ public:
 
 signals:
     void started();
-    void finished(int errorCode, const QString& installerPath);
+    void finished(int errorCode, const QString& errorText, const QString& installerPath);
 
     void currentProgressChanged();
     void totalProgressChanged();

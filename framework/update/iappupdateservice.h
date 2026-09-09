@@ -44,6 +44,7 @@ public:
 
     virtual bool isReleaseDownloaded() const = 0;
     virtual muse::io::path_t downloadedReleasePath() const = 0;
+    virtual void removeDownloadedRelease() = 0;
 
     virtual bool canAutoInstall() const = 0;
 

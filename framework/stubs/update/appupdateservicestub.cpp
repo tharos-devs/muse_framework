@@ -67,3 +67,7 @@ muse::io::path_t AppUpdateServiceStub::downloadedReleasePath() const
 {
     return {};
 }
+
+void AppUpdateServiceStub::removeDownloadedRelease()
+{
+}

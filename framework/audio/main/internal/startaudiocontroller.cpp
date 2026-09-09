@@ -243,7 +243,15 @@ void StartAudioController::startAudioProcessing(const IApplication::RunMode& mod
 void StartAudioController::stopAudioProcessing()
 {
 #ifndef Q_OS_WASM
-    m_rpcChannel->send(rpc::make_request(rpc::GLOBAL_CTX_ID, MsgCode::EngineDeinit), [this](const Msg&) {
+    bool isEngineDeinited = false;
+
+    //! NOTE Stop waiting for the engine to start: below we process the RPC channel,
+    //! and a still pending EngineRunning would send EngineInit in the middle of the shutdown
+    m_isEngineRunning.ch.disconnect(this);
+
+    m_rpcChannel->send(rpc::make_request(rpc::GLOBAL_CTX_ID, MsgCode::EngineDeinit), [this, &isEngineDeinited](const Msg&) {
+        isEngineDeinited = true;
+
         if (m_isAudioStarted.val) {
             m_isAudioStarted.set(false);
         }
@@ -257,7 +265,7 @@ void StartAudioController::stopAudioProcessing()
         // Ensure that RPC process() is called at least once
         m_rpcChannel->process();
 
-        if (!m_isAudioStarted.val) {
+        if (isEngineDeinited) {
             break;
         }
 
@@ -279,7 +287,7 @@ void StartAudioController::stopAudioProcessing()
 
         std::this_thread::yield();
         std::this_thread::sleep_for(10ms);
-    } while (m_isAudioStarted.val);
+    } while (!isEngineDeinited);
 
     audioDriverController()->close();
 

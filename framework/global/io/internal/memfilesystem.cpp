@@ -22,6 +22,7 @@
 #include "memfilesystem.h"
 
 #include <cstring>
+#include <limits>
 
 #include <QFile>
 #include <QFileInfo>
@@ -140,6 +141,11 @@ muse::RetVal<uint64_t> MemFileSystem::fileSize(const muse::io::path_t& path) con
     } else {
         return muse::RetVal<uint64_t>::make_ok(m_files.at(path).size());
     }
+}
+
+muse::RetVal<uint64_t> MemFileSystem::availableSpace(const muse::io::path_t&) const
+{
+    return muse::RetVal<uint64_t>::make_ok(std::numeric_limits<uint64_t>::max());
 }
 
 muse::RetVal<muse::io::paths_t> MemFileSystem::scanFiles(const muse::io::path_t& /*rootDir*/, const std::vector<std::string>& /*filters*/,

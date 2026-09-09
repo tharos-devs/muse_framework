@@ -38,6 +38,19 @@ using namespace muse::update;
 using namespace muse::actions;
 using namespace muse::async;
 
+void AppUpdateScenario::init()
+{
+    const std::string installing = configuration()->installingReleaseVersion();
+    if (installing.empty()) {
+        return;
+    }
+
+    configuration()->setInstallingReleaseVersion(std::string());
+
+    //! NOTE: The version differs if the user canceled the installer or it failed.
+    m_hasCompletedUpdate = Version(installing) == application()->fullVersion();
+}
+
 bool AppUpdateScenario::needCheckForUpdate() const
 {
     return configuration()->needCheckForUpdate();
@@ -92,23 +105,24 @@ bool AppUpdateScenario::hasUpdate() const
     return !shouldIgnoreUpdate(lastCheckResult.val);
 }
 
-Promise<Ret> AppUpdateScenario::processUpdateError(int errorCode)
+Promise<Ret> AppUpdateScenario::processUpdateError(const Ret& error)
 {
     const auto unknownError = async::make_promise<Ret>([](auto resolve, auto) {
         return resolve(muse::make_ret(Ret::Code::UnknownError));
     });
 
+    const int errorCode = error.code();
     IF_ASSERT_FAILED(errorCode >= static_cast<int>(Ret::Code::UpdateFirst)
                      && errorCode <= static_cast<int>(Ret::Code::UpdateLast)) {
         return unknownError;
     }
 
-    const Err error = static_cast<Err>(errorCode);
-    IF_ASSERT_FAILED(error != Err::NoError) {
+    const Err err = static_cast<Err>(errorCode);
+    IF_ASSERT_FAILED(err != Err::NoError) {
         return unknownError;
     }
 
-    auto message = error == Err::NoUpdate ? showNoUpdateMsg() : showServerErrorMsg();
+    auto message = err == Err::NoUpdate ? showNoUpdateMsg() : showServerErrorMsg();
     return message.then<Ret>(this, [errorCode](const IInteractive::Result&, auto resolve) {
         const Ret::Code code = static_cast<Ret::Code>(errorCode);
         return resolve(muse::make_ret(code));
@@ -144,14 +158,11 @@ Promise<Ret> AppUpdateScenario::showReleaseInfo(const ReleaseInfo& info)
         }
 
         if (actionCode == "skip") {
-            configuration()->setSkippedReleaseVersion(info.version);
+            skipRelease(info.version);
             return resolve(muse::make_ret(Ret::Code::Cancel));
         }
 
-        //! NOTE: In test mode we skip the progress dialog and jump straight to the "needs to close" dialog...
-        const bool testMode = configuration()->checkForUpdateTestMode();
-        auto promise = testMode ? askToCloseAppAndCompleteInstall(/*installerPath*/ String()) : downloadRelease();
-        promise.onResolve(this, [resolve](const Ret& ret) {
+        downloadRelease().onResolve(this, [resolve](const Ret& ret) {
             (void)resolve(ret);
         });
 
@@ -167,14 +178,41 @@ Promise<IInteractive::Result> AppUpdateScenario::showServerErrorMsg()
                                 muse::trc("update", "Check for update"));
 }
 
+Promise<Ret> AppUpdateScenario::askToRetryOnNotEnoughDiskSpace(const Ret& error, const std::function<Promise<Ret>()>& retry)
+{
+    const IInteractive::ButtonDatas buttons = {
+        interactive()->buttonData(IInteractive::Button::Cancel),
+        interactive()->buttonData(IInteractive::Button::Retry)
+    };
+
+    return interactive()->error(muse::trc("update", "Not enough disk space"), error.text(),
+                                buttons, int(IInteractive::Button::Retry), { IInteractive::WithIcon },
+                                muse::trc("update", "Check for update"))
+           .then<Ret>(this, [this, retry](const IInteractive::Result& res, auto resolve) {
+        if (!res.isButton(IInteractive::Button::Retry)) {
+            return resolve(muse::make_ret(Ret::Code::Cancel));
+        }
+
+        retry().onResolve(this, [resolve](const Ret& ret) {
+            (void)resolve(ret);
+        });
+
+        return Promise<Ret>::dummy_result();
+    });
+}
+
 Promise<Ret> AppUpdateScenario::downloadRelease()
 {
     io::path_t packagePath = service()->downloadedReleasePath();
 
     if (packagePath.empty()) {
         RetVal<Val> rv = interactive()->openSync("muse://update/app?mode=download");
+        if (rv.ret.code() == static_cast<int>(Err::NotEnoughDiskSpace)) {
+            return askToRetryOnNotEnoughDiskSpace(rv.ret, [this]() { return downloadRelease(); });
+        }
+
         if (!rv.ret) {
-            return processUpdateError(rv.ret.code());
+            return processUpdateError(rv.ret);
         }
         packagePath = rv.val.toString();
     }
@@ -202,6 +240,13 @@ Promise<Ret> AppUpdateScenario::prepareAndInstall(const io::path_t& packagePath)
             async::Async::call(this, [this, packagePath, prepared, resolve]() {
                 auto complete = [resolve](const Ret& ret) { (void)resolve(ret); };
                 if (!prepared.ret) {
+                    if (prepared.ret.code() == static_cast<int>(Err::NotEnoughDiskSpace)) {
+                        askToRetryOnNotEnoughDiskSpace(prepared.ret, [this, packagePath]() {
+                            return prepareAndInstall(packagePath);
+                        }).onResolve(this, complete);
+                        return;
+                    }
+
                     LOGE() << "failed to prepare update, falling back to manual install: " << prepared.ret.toString();
                     askToCloseAppAndCompleteInstall(packagePath).onResolve(this, complete);
                     return;
@@ -242,6 +287,8 @@ Promise<Ret> AppUpdateScenario::askToRestartAndInstall(const io::path_t& package
             return Promise<Ret>::dummy_result();
         }
 
+        configuration()->setInstallingReleaseVersion(service()->lastCheckResult().val.version);
+
         //! NOTE: The helper has been spawned and will replace the app and
         //! relaunch once we quit. Quit without an installer path so the
         //! legacy "open installer" path is not taken.
@@ -267,6 +314,8 @@ Promise<Ret> AppUpdateScenario::askToCloseAppAndCompleteInstall(const io::path_t
             return resolve(muse::make_ret(Ret::Code::Cancel));
         }
 
+        configuration()->setInstallingReleaseVersion(service()->lastCheckResult().val.version);
+
         if (multiwindowsProvider()->windowCount() != 1) {
             multiwindowsProvider()->quitAllAndRunInstallation(packagePath);
         }
@@ -278,16 +327,21 @@ Promise<Ret> AppUpdateScenario::askToCloseAppAndCompleteInstall(const io::path_t
 
 bool AppUpdateScenario::shouldIgnoreUpdate(const ReleaseInfo& info) const
 {
-    return info.version == configuration()->skippedReleaseVersion() && !configuration()->checkForUpdateTestMode();
+    return info.version == configuration()->skippedReleaseVersion();
 }
 
 void AppUpdateScenario::downloadUpdateInBackground()
 {
-    if (m_bgDownloadInProgress || hasReadyUpdate()) {
+    if (m_bgDownloadInProgress || !m_readyPackagePath.empty()) {
         return;
     }
 
-    if (!hasUpdate() || !configuration()->autoInstallEnabled()) {
+    if (!hasUpdate()) {
+        return;
+    }
+
+    if (!configuration()->autoDownloadEnabled()) {
+        LOGI() << "background update download skipped: user has disabled";
         return;
     }
 
@@ -296,6 +350,7 @@ void AppUpdateScenario::downloadUpdateInBackground()
     if (service()->isReleaseDownloaded()) {
         m_readyPackagePath = service()->downloadedReleasePath();
         m_readyUpdateVersion = service()->lastCheckResult().val.version;
+        m_readyUpdateDismissed = false;
         m_hasReadyUpdateChanged.notify();
         return;
     }
@@ -321,15 +376,50 @@ void AppUpdateScenario::downloadUpdateInBackground()
             return;
         }
 
+        //! NOTE: The release may have been skipped while the download was running.
+        if (!hasUpdate()) {
+            return;
+        }
+
         m_readyPackagePath = res.val.toString();
         m_readyUpdateVersion = service()->lastCheckResult().val.version;
+        m_readyUpdateDismissed = false;
         m_hasReadyUpdateChanged.notify();
     }, Asyncable::Mode::SetReplace);
 }
 
+void AppUpdateScenario::skipRelease(const std::string& version)
+{
+    configuration()->setSkippedReleaseVersion(version);
+    service()->removeDownloadedRelease();
+
+    m_readyPackagePath = io::path_t();
+    m_hasReadyUpdateChanged.notify();
+}
+
+bool AppUpdateScenario::hasCompletedUpdate() const
+{
+    return m_hasCompletedUpdate;
+}
+
+async::Notification AppUpdateScenario::hasCompletedUpdateChanged() const
+{
+    return m_hasCompletedUpdateChanged;
+}
+
+void AppUpdateScenario::dismissCompletedUpdate()
+{
+    if (!m_hasCompletedUpdate) {
+        return;
+    }
+
+    m_hasCompletedUpdate = false;
+    m_hasCompletedUpdateChanged.notify();
+}
+
 bool AppUpdateScenario::hasReadyUpdate() const
 {
-    return !m_readyPackagePath.empty();
+    return !m_readyPackagePath.empty() && !m_readyUpdateDismissed;
 }
 
 async::Notification AppUpdateScenario::hasReadyUpdateChanged() const
@@ -348,6 +438,20 @@ void AppUpdateScenario::installReadyUpdate()
         return;
     }
 
+    if (!service()->canAutoInstall() || multiwindowsProvider()->windowCount() != 1) {
+        askToCloseAppAndCompleteInstall(m_readyPackagePath).onResolve(this, [](const Ret&) {});
+        return;
+    }
+
+    prepareAndInstall(m_readyPackagePath).onResolve(this, [](const Ret&) {});
+}
+
+void AppUpdateScenario::showReadyUpdateInfo()
+{
+    if (m_readyPackagePath.empty()) {
+        return;
+    }
+
     const ReleaseInfo& info = service()->lastCheckResult().val;
 
     UriQuery query("muse://update/appreleaseinfo");
@@ -361,21 +465,22 @@ void AppUpdateScenario::installReadyUpdate()
         const QString actionCode = val.toQString();
 
         if (actionCode == "skip") {
-            configuration()->setSkippedReleaseVersion(m_readyUpdateVersion);
-            m_readyPackagePath = io::path_t();
-            m_hasReadyUpdateChanged.notify();
+            skipRelease(m_readyUpdateVersion);
             return;
         }
 
-        if (actionCode != "install") {
-            return;
+        if (actionCode == "install") {
+            installReadyUpdate();
         }
-
-        if (!service()->canAutoInstall() || multiwindowsProvider()->windowCount() != 1) {
-            askToCloseAppAndCompleteInstall(m_readyPackagePath).onResolve(this, [](const Ret&) {});
-            return;
-        }
-
-        prepareAndInstall(m_readyPackagePath).onResolve(this, [](const Ret&) {});
     });
+}
+
+void AppUpdateScenario::dismissReadyUpdate()
+{
+    if (m_readyPackagePath.empty() || m_readyUpdateDismissed) {
+        return;
+    }
+
+    m_readyUpdateDismissed = true;
+    m_hasReadyUpdateChanged.notify();
 }

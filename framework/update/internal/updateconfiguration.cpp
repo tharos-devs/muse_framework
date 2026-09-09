@@ -31,11 +31,11 @@ using namespace muse::update;
 static const std::string module_name("update");
 
 static const Settings::Key CHECK_FOR_UPDATE_KEY(module_name, "application/checkForUpdate");
-static const Settings::Key CHECK_FOR_UPDATE_TEST_MODE_KEY(module_name, "application/checkForUpdateTestMode");
 static const Settings::Key ALLOW_UPDATE_ON_PRERELEASE(module_name, "application/allowUpdateOnPreRelease");
 static const Settings::Key SKIPPED_VERSION_KEY(module_name, "application/skippedVersion");
+static const Settings::Key INSTALLING_VERSION_KEY(module_name, "application/installingVersion");
 static const Settings::Key LAST_DOWNLOADED_PACKAGE_KEY(module_name, "application/lastDownloadedPackage");
-static const Settings::Key AUTO_INSTALL_KEY(module_name, "application/autoInstall");
+static const Settings::Key AUTO_DOWNLOAD_KEY(module_name, "application/autoDownload");
 
 void UpdateConfiguration::init()
 {
@@ -46,8 +46,6 @@ void UpdateConfiguration::init()
         m_needCheckForUpdateChanged.notify();
     });
 
-    settings()->setDefaultValue(CHECK_FOR_UPDATE_TEST_MODE_KEY, Val(false));
-
     bool allowUpdateOnPreRelease = false;
 #ifdef MUSESCORE_ALLOW_UPDATE_ON_PRERELEASE
     allowUpdateOnPreRelease = true;
@@ -56,7 +54,7 @@ void UpdateConfiguration::init()
 #endif
     settings()->setDefaultValue(ALLOW_UPDATE_ON_PRERELEASE, Val(allowUpdateOnPreRelease));
 
-    settings()->setDefaultValue(AUTO_INSTALL_KEY, Val(true));
+    settings()->setDefaultValue(AUTO_DOWNLOAD_KEY, Val(true));
 }
 
 bool UpdateConfiguration::isAppUpdatable() const
@@ -89,14 +87,14 @@ async::Notification UpdateConfiguration::needCheckForUpdateChanged() const
     return m_needCheckForUpdateChanged;
 }
 
-bool UpdateConfiguration::autoInstallEnabled() const
+bool UpdateConfiguration::autoDownloadEnabled() const
 {
-    return settings()->value(AUTO_INSTALL_KEY).toBool();
+    return settings()->value(AUTO_DOWNLOAD_KEY).toBool();
 }
 
-void UpdateConfiguration::setAutoInstallEnabled(bool enabled)
+void UpdateConfiguration::setAutoDownloadEnabled(bool enabled)
 {
-    settings()->setSharedValue(AUTO_INSTALL_KEY, Val(enabled));
+    settings()->setSharedValue(AUTO_DOWNLOAD_KEY, Val(enabled));
 }
 
 std::string UpdateConfiguration::skippedReleaseVersion() const
@@ -109,6 +107,16 @@ void UpdateConfiguration::setSkippedReleaseVersion(const std::string& version)
     settings()->setSharedValue(SKIPPED_VERSION_KEY, Val(version));
 }
 
+std::string UpdateConfiguration::installingReleaseVersion() const
+{
+    return settings()->value(INSTALLING_VERSION_KEY).toString();
+}
+
+void UpdateConfiguration::setInstallingReleaseVersion(const std::string& version)
+{
+    settings()->setSharedValue(INSTALLING_VERSION_KEY, Val(version));
+}
+
 muse::io::path_t UpdateConfiguration::lastDownloadedPackagePath() const
 {
     return settings()->value(LAST_DOWNLOADED_PACKAGE_KEY).toPath();
@@ -117,11 +125,6 @@ muse::io::path_t UpdateConfiguration::lastDownloadedPackagePath() const
 void UpdateConfiguration::setLastDownloadedPackagePath(const muse::io::path_t& path)
 {
     settings()->setSharedValue(LAST_DOWNLOADED_PACKAGE_KEY, Val(path));
-}
-
-bool UpdateConfiguration::checkForUpdateTestMode() const
-{
-    return settings()->value(CHECK_FOR_UPDATE_TEST_MODE_KEY).toBool();
 }
 
 std::string UpdateConfiguration::checkForAppUpdateUrl() const
@@ -166,4 +169,9 @@ muse::io::path_t UpdateConfiguration::downloadsPath() const
 muse::io::path_t UpdateConfiguration::updateRequestHistoryJsonPath() const
 {
     return globalConfiguration()->userAppDataPath() + "/update_request_history.json";
+}
+
+muse::io::path_t UpdateConfiguration::helperLogPath() const
+{
+    return globalConfiguration()->userAppDataPath() + "/logs/museupdater.log";
 }

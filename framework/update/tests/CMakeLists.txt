@@ -23,6 +23,7 @@ set(MODULE_TEST muse_update_test)
 set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/mocks/updateconfigurationmock.h
     ${CMAKE_CURRENT_LIST_DIR}/mocks/appupdateservicemock.h
+    ${CMAKE_CURRENT_LIST_DIR}/mocks/updateinstallermock.h
     ${CMAKE_CURRENT_LIST_DIR}/appupdateservice_tests.cpp
     ${CMAKE_CURRENT_LIST_DIR}/appupdatescenario_tests.cpp
 )

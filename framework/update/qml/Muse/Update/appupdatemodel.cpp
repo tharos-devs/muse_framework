@@ -49,7 +49,7 @@ void AppUpdateModel::load(const QString& mode)
     RetVal<Progress> progress = service()->downloadRelease();
     if (!progress.ret) {
         LOGE() << progress.ret.toString();
-        emit finished(progress.ret.code(), QString());
+        emit finished(progress.ret.code(), QString::fromStdString(progress.ret.text()), QString());
         return;
     }
 
@@ -73,7 +73,7 @@ void AppUpdateModel::load(const QString& mode)
             LOGE() << res.ret.toString();
         }
 
-        emit finished(res.ret.code(), res.val.toQString());
+        emit finished(res.ret.code(), QString::fromStdString(res.ret.text()), res.val.toQString());
     });
 }
 

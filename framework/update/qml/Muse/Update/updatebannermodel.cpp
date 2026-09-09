@@ -33,6 +33,10 @@ void UpdateBannerModel::load()
     scenario()->hasReadyUpdateChanged().onNotify(this, [this]() {
         emit updateReadyChanged();
     });
+
+    scenario()->hasCompletedUpdateChanged().onNotify(this, [this]() {
+        emit updateCompletedChanged();
+    });
 }
 
 bool UpdateBannerModel::updateReady() const
@@ -45,7 +49,32 @@ QString UpdateBannerModel::updateVersion() const
     return QString::fromStdString(scenario()->readyUpdateVersion());
 }
 
+QString UpdateBannerModel::appName() const
+{
+    return application()->title().toQString();
+}
+
 void UpdateBannerModel::install()
 {
     scenario()->installReadyUpdate();
+}
+
+void UpdateBannerModel::showDetails()
+{
+    scenario()->showReadyUpdateInfo();
+}
+
+void UpdateBannerModel::dismissReady()
+{
+    scenario()->dismissReadyUpdate();
+}
+
+bool UpdateBannerModel::updateCompleted() const
+{
+    return scenario()->hasCompletedUpdate();
+}
+
+void UpdateBannerModel::dismissCompleted()
+{
+    scenario()->dismissCompletedUpdate();
 }

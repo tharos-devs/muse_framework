@@ -173,6 +173,20 @@ std::wstring WinUpdateInstaller::appId() const
     return baseName.toStdWString();
 }
 
+void WinUpdateInstaller::importHelperLog()
+{
+    const io::path_t src(QString::fromStdWString(win::logFilePath(appId())));
+    if (!fileSystem()->exists(src)) {
+        return;
+    }
+
+    const io::path_t dst = configuration()->helperLogPath();
+    const Ret ret = fileSystem()->copy(src, dst, true);
+    if (!ret) {
+        LOGW() << "failed to copy " << src << " to " << dst << ": " << ret.toString();
+    }
+}
+
 bool WinUpdateInstaller::isInPlaceUpdateSupported() const
 {
     if (!isRegisteredForThisInstall(appId())) {

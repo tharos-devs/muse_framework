@@ -48,5 +48,14 @@ public:
 
     //! Install the already-downloaded update (asks to restart, then applies it).
     virtual void installReadyUpdate() = 0;
+    //! Show the release notes of the ready update, with install/skip actions.
+    virtual void showReadyUpdateInfo() = 0;
+    //! Hide the ready update banner for this session (the package is kept).
+    virtual void dismissReadyUpdate() = 0;
+
+    //! This launch is the first one after an update was installed.
+    virtual bool hasCompletedUpdate() const = 0;
+    virtual async::Notification hasCompletedUpdateChanged() const = 0;
+    virtual void dismissCompletedUpdate() = 0;
 };
 }

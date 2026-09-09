@@ -19,25 +19,18 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 #pragma once
 
-#include "update/iappupdateservice.h"
+#include <gmock/gmock.h>
+
+#include "update/iupdateinstaller.h"
 
 namespace muse::update {
-class AppUpdateServiceStub : public IAppUpdateService
+class UpdateInstallerMock : public IUpdateInstaller
 {
 public:
-    async::Promise<muse::RetVal<ReleaseInfo> > checkForUpdate() override;
-    const RetVal<ReleaseInfo>& lastCheckResult() const override;
-    RetVal<Progress> downloadRelease() override;
-
-    bool canAutoInstall() const override;
-    RetVal<muse::io::path_t> prepareUpdate(const muse::io::path_t& packagePath) override;
-    Ret finalizeUpdate(const muse::io::path_t& preparedPath) override;
-
-    bool isReleaseDownloaded() const override;
-    muse::io::path_t downloadedReleasePath() const override;
-    void removeDownloadedRelease() override;
+    MOCK_METHOD(bool, isInPlaceUpdateSupported, (), (const, override));
+    MOCK_METHOD(RetVal<muse::io::path_t>, prepareUpdate, (const muse::io::path_t&), (override));
+    MOCK_METHOD(Ret, finalizeUpdate, (const muse::io::path_t&, const InstallProgressUi&), (override));
 };
 }

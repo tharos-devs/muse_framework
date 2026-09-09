@@ -34,6 +34,8 @@ qt_add_qml_module(muse_update_qml
         UpdateBanner.qml
         internal/AppReleaseInfoBottomPanel.qml
         internal/ReleaseNotesView.qml
+        internal/UpdateCompletedContent.qml
+        internal/UpdateReadyContent.qml
     IMPORTS
         TARGET muse_ui_qml
         TARGET muse_uicomponents_qml

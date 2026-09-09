@@ -50,6 +50,8 @@ public:
     RetVal<muse::io::path_t> prepareUpdate(const muse::io::path_t& packagePath) override;
     Ret finalizeUpdate(const muse::io::path_t& preparedPath, const InstallProgressUi& ui) override;
 
+    void importHelperLog();
+
 private:
     //! Identifier shared with the installer-registered task and the HKLM key;
     //! the base name of the running executable, e.g. "MuseScore4".

@@ -19,23 +19,23 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 import QtQuick
-import QtQuick.Layouts
 
 import Muse.Ui
 import Muse.UiComponents
 import Muse.Update
 
+import "internal"
+
 Rectangle {
     id: root
 
     readonly property bool hasReadyUpdate: updateBannerModel.updateReady
-    readonly property string updateVersion: updateBannerModel.updateVersion
+    readonly property bool hasCompletedUpdate: updateBannerModel.updateCompleted
 
-    implicitHeight: content.implicitHeight + 24
+    implicitHeight: loader.implicitHeight + 24
 
-    visible: hasReadyUpdate
+    visible: loader.sourceComponent !== null
 
     radius: 4
     color: ui.theme.backgroundPrimaryColor
@@ -50,35 +50,46 @@ Rectangle {
         updateBannerModel.load()
     }
 
-    ColumnLayout {
-        id: content
+    Loader {
+        id: loader
 
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 12
 
-        spacing: 8
+        sourceComponent: root.hasReadyUpdate ? readyContent
+                                             : root.hasCompletedUpdate ? completedContent
+                                                                       : null
+    }
 
-        StyledTextLabel {
-            Layout.fillWidth: true
+    Component {
+        id: readyContent
 
-            horizontalAlignment: Text.AlignLeft
-            wrapMode: Text.WordWrap
+        UpdateReadyContent {
+            appName: updateBannerModel.appName
+            updateVersion: updateBannerModel.updateVersion
 
-            text: root.updateVersion.length > 0
-                  ? qsTrc("update", "Update to version %1 is ready").arg(root.updateVersion)
-                  : qsTrc("update", "An update is ready")
-        }
+            onDetailsRequested: {
+                updateBannerModel.showDetails()
+            }
 
-        FlatButton {
-            Layout.fillWidth: true
-
-            text: qsTrc("update", "Update")
-            accentButton: true
-
-            onClicked: {
+            onInstallRequested: {
                 updateBannerModel.install()
+            }
+
+            onDismissRequested: {
+                updateBannerModel.dismissReady()
+            }
+        }
+    }
+
+    Component {
+        id: completedContent
+
+        UpdateCompletedContent {
+            onDismissRequested: {
+                updateBannerModel.dismissCompleted()
             }
         }
     }

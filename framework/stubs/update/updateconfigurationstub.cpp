@@ -52,12 +52,12 @@ muse::async::Notification UpdateConfigurationStub::needCheckForUpdateChanged() c
     return n;
 }
 
-bool UpdateConfigurationStub::autoInstallEnabled() const
+bool UpdateConfigurationStub::autoDownloadEnabled() const
 {
     return false;
 }
 
-void UpdateConfigurationStub::setAutoInstallEnabled(bool)
+void UpdateConfigurationStub::setAutoDownloadEnabled(bool)
 {
 }
 
@@ -77,11 +77,6 @@ void UpdateConfigurationStub::setLastDownloadedPackagePath(const io::path_t&)
 
 void UpdateConfigurationStub::setSkippedReleaseVersion(const std::string&)
 {
-}
-
-bool UpdateConfigurationStub::checkForUpdateTestMode() const
-{
-    return false;
 }
 
 std::string UpdateConfigurationStub::checkForAppUpdateUrl() const
@@ -120,6 +115,20 @@ muse::io::path_t UpdateConfigurationStub::updateDataPath() const
 }
 
 muse::io::path_t UpdateConfigurationStub::updateRequestHistoryJsonPath() const
+{
+    return "";
+}
+
+std::string UpdateConfigurationStub::installingReleaseVersion() const
+{
+    return {};
+}
+
+void UpdateConfigurationStub::setInstallingReleaseVersion(const std::string&)
+{
+}
+
+muse::io::path_t UpdateConfigurationStub::helperLogPath() const
 {
     return "";
 }

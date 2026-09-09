@@ -2,10 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  * MuseScore-CLA-applies
  *
- * MuseScore Studio
+ * MuseScore
  * Music Composition & Notation
  *
- * Copyright (C) 2025 MuseScore Limited and others
+ * Copyright (C) 2026 MuseScore BVBA and others
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 3 as
@@ -22,22 +22,21 @@
 
 #pragma once
 
-#include "types/ret.h"
+#include <gmock/gmock.h>
 
-namespace muse::update {
-enum class Err {
-    Undefined       = int(muse::Ret::Code::Undefined),
-    NoError         = int(muse::Ret::Code::Ok),
-    UnknownError    = int(muse::Ret::Code::UpdateFirst),
+#include "interactive/iplatforminteractive.h"
 
-    NoUpdate,
-    NetworkError,
-    ReleaseInfoParseError,
-    NotEnoughDiskSpace,
-};
-
-inline muse::Ret make_ret(Err e, const std::string& text = {})
+namespace muse {
+class PlatformInteractiveMock : public IPlatformInteractive
 {
-    return muse::Ret(static_cast<int>(e), text);
-}
+public:
+    MOCK_METHOD(Ret, openUrl, (const std::string& url), (const, override));
+    MOCK_METHOD(Ret, openUrl, (const QUrl& url), (const, override));
+
+    MOCK_METHOD(Ret, isAppExists, (const std::string& appIdentifier), (const, override));
+    MOCK_METHOD(Ret, canOpenApp, (const UriQuery& uri), (const, override));
+    MOCK_METHOD(async::Promise<Ret>, openApp, (const UriQuery& uri), (const, override));
+
+    MOCK_METHOD(Ret, revealInFileBrowser, (const io::path_t& filePath), (const, override));
+};
 }

@@ -160,7 +160,7 @@ Ret MacUpdateInstaller::finalizeUpdate(const muse::io::path_t& preparedPath, con
     //    the staged bundle is signed by our team, swaps it into place and
     //    relaunches.
     const QString bundlePath = currentBundlePath().toQString();
-    const QString logPath = configuration()->updateDataPath().toQString() + "/museupdater.log";
+    const QString logPath = configuration()->helperLogPath().toQString();
     const QStringList args = {
         "--wait-pid", QString::number(QCoreApplication::applicationPid()),
         "--src", stagingApp,
