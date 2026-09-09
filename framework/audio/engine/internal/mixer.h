@@ -58,7 +58,7 @@ public:
     void init();
 
     Ret addTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends);
-    Ret addAuxTrack(TrackChainPtr trackChain);
+    Ret addAuxTrack(TrackChainPtr trackChain, bool isGroupBus);
     Ret removeTrack(const TrackId trackId);
 
     void setAuxSends(const TrackId trackId, const AuxSendsParams& auxSends);
@@ -82,6 +82,7 @@ private:
     void prepareAuxBuffers(size_t outBufferSize);
     void writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends);
     void processAuxChannels(float* buffer, samples_t samplesPerChannel);
+    bool hasActiveGroupBusSend(const AuxSendsParams& auxSends) const;
 
     bool useMultithreading() const;
 
@@ -95,6 +96,8 @@ private:
         //! an fx tail (e.g. reverb) can ring out and the level meter can settle, without
         //! risking indefinite processing if the fx never produces an exact zero output
         samples_t silenceGraceSamplesLeft = 0;
+        //! NOTE: for aux tracks only - see TrackParams::isGroupBus
+        bool isGroupBus = false;
     };
 
     std::vector<TrackData> m_tracks;

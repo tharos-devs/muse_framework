@@ -247,12 +247,14 @@ TEST_F(Audio_RpcPackerTests, ControlParams_Automation)
 TEST_F(Audio_RpcPackerTests, TrackParams)
 {
     TrackParams origin;
+    origin.isGroupBus = true;
 
     KNOWN_FIELDS(origin,
                  origin.source,
                  origin.fxChain,
                  origin.auxSends,
-                 origin.control);
+                 origin.control,
+                 origin.isGroupBus);
 
     ByteArray data = rpc::RpcPacker::pack(origin);
 
@@ -264,6 +266,7 @@ TEST_F(Audio_RpcPackerTests, TrackParams)
     EXPECT_TRUE(origin.fxChain == unpacked.fxChain);
     EXPECT_TRUE(origin.auxSends == unpacked.auxSends);
     EXPECT_TRUE(origin.control == unpacked.control);
+    EXPECT_TRUE(origin.isGroupBus == unpacked.isGroupBus);
 }
 
 TEST_F(Audio_RpcPackerTests, SoundPreset)
