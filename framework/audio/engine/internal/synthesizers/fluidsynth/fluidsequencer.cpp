@@ -414,8 +414,17 @@ velocity_t FluidSequencer::noteVelocity(const mpe::NoteEvent& noteEvent) const
         return std::clamp<velocity_t>(velocity, 0, MAX_SUPPORTED_VELOCITY);
     }
 
-    if (m_useDynamicEvents) {
-        float fraction = expressionCtx.expressionCurve.empty() ? 0.5f : expressionCtx.expressionCurve.velocityFraction();
+    //! NOTE: m_useDynamicEvents means this note's dynamic is ALSO driven live via CC11
+    //! Expression (see addDynamicEvents()/currentExpressionLevels()), which is required to
+    //! shape a swell *within* a single held note (a hairpin/single-note-dynamics curve). But
+    //! when there's no such curve for this note - the overwhelming common case, a plain static
+    //! dynamic marking with no hairpin - note-on velocity must still reflect that dynamic
+    //! level, exactly like the non-useDynamicEvents path below: leaving it at a flat neutral
+    //! fraction here made every note the same volume regardless of pp vs ff whenever a
+    //! FluidSynth-backed instrument (basic soundfont) declares singleNoteDynamics, since CC11
+    //! Expression alone is a comparatively subtle multiplier next to note-on velocity
+    if (m_useDynamicEvents && !expressionCtx.expressionCurve.empty()) {
+        float fraction = expressionCtx.expressionCurve.velocityFraction();
         velocity_t result = RealRound(fraction * MAX_SUPPORTED_VELOCITY, 0);
         return std::clamp<velocity_t>(result, 0, MAX_SUPPORTED_VELOCITY);
     }
