@@ -276,12 +276,12 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::ControlParams
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::TrackParams& value)
 {
-    p.process(value.source, value.fxChain, value.auxSends, value.control, value.isGroupBus);
+    p.process(value.source, value.fxChain, value.auxSends, value.control, value.isGroupBus, value.auxChannelIndex);
 }
 
 inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::TrackParams& value)
 {
-    p.process(value.source, value.fxChain, value.auxSends, value.control, value.isGroupBus);
+    p.process(value.source, value.fxChain, value.auxSends, value.control, value.isGroupBus, value.auxChannelIndex);
 }
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::SoundPreset& value)

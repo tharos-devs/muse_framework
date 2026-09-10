@@ -510,6 +510,14 @@ struct TrackParams {
     ControlParams control;
 
     //! NOTE: only meaningful for an aux bus track (ignored for regular instrument/master
+    //! tracks) - the logical aux/group bus slot this track occupies (matches the index other
+    //! tracks use into their own auxSends). Must be passed through to Mixer::addAuxTrack() so
+    //! the engine's aux bus storage stays addressed by this same index instead of insertion
+    //! order, which would desync from every other track's auxSends[index] as soon as a bus is
+    //! ever removed (freeing/recycling its index) while a later one still exists
+    aux_channel_idx_t auxChannelIndex = 0;
+
+    //! NOTE: only meaningful for an aux bus track (ignored for regular instrument/master
     //! tracks) - a "group" bus is a track's only path to the master output (its direct mix
     //! is skipped, see Mixer::process()), as opposed to a regular "send/return" aux bus,
     //! where a track's direct-to-master signal is untouched and the bus is a parallel path

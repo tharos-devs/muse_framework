@@ -72,7 +72,7 @@ Ret Mixer::addTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends)
     return make_ok();
 }
 
-Ret Mixer::addAuxTrack(TrackChainPtr trackChain, bool isGroupBus)
+Ret Mixer::addAuxTrack(TrackChainPtr trackChain, bool isGroupBus, aux_channel_idx_t auxChannelIndex)
 {
     ONLY_AUDIO_ENGINE_THREAD;
     const size_t outBufferSize = m_outputSpec.samplesPerChannel * m_outputSpec.audioChannelCount;
@@ -83,7 +83,15 @@ Ret Mixer::addAuxTrack(TrackChainPtr trackChain, bool isGroupBus)
     trackData.buffer.resize(outBufferSize);
     trackData.isGroupBus = isGroupBus;
 
-    m_auxTracks.emplace_back(std::move(trackData));
+    //! NOTE: stored at its logical bus index (not appended) so this stays the same slot every
+    //! other track's AuxSendsParams[auxChannelIndex] addresses - see writeTrackToAuxBuffers()/
+    //! hasActiveGroupBusSend(), which index m_auxTracks positionally. Appending here instead
+    //! would desync that indexing the moment a lower-indexed bus is ever removed (see
+    //! removeTrack(), which leaves a hole rather than shifting later buses down)
+    if (m_auxTracks.size() <= auxChannelIndex) {
+        m_auxTracks.resize(auxChannelIndex + 1);
+    }
+    m_auxTracks[auxChannelIndex] = std::move(trackData);
 
     return make_ok();
 }
@@ -101,9 +109,16 @@ Ret Mixer::removeTrack(const TrackId trackId)
     }
 
     if (!removed) {
-        removed = muse::remove_if(m_auxTracks, [trackId](const TrackData& track) {
-            return track.trackId == trackId;
-        });
+        //! NOTE: reset the slot in place instead of erasing it - erasing would shift every
+        //! higher-indexed bus down by one, desyncing them from the logical index still stored
+        //! in other tracks' AuxSendsParams (see addAuxTrack())
+        for (TrackData& aux : m_auxTracks) {
+            if (aux.chain && aux.trackId == trackId) {
+                aux = TrackData();
+                removed = true;
+                break;
+            }
+        }
     }
 
     return removed ? make_ret(Ret::Code::Ok) : make_ret(Err::InvalidTrackId);
@@ -123,7 +138,9 @@ void Mixer::onOutputSpecChanged(const OutputSpec& spec)
     }
 
     for (auto& t : m_auxTracks) {
-        t.chain->setOutputSpec(spec);
+        if (t.chain) {
+            t.chain->setOutputSpec(spec);
+        }
     }
 }
 
@@ -136,7 +153,9 @@ void Mixer::onModeChanged(const ProcessMode mode)
     }
 
     for (auto& t : m_auxTracks) {
-        t.chain->setMode(mode);
+        if (t.chain) {
+            t.chain->setMode(mode);
+        }
     }
 }
 
@@ -283,7 +302,7 @@ void Mixer::prepareAuxBuffers(size_t outBufferSize)
 {
     for (auto& aux : m_auxTracks) {
         aux.processed = false;
-        if (!aux.chain->fxChain()) {
+        if (!aux.chain || !aux.chain->fxChain()) {
             continue;
         }
         aux.buffer.resize(outBufferSize);
@@ -299,7 +318,7 @@ void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSiz
         }
 
         TrackData& aux = m_auxTracks.at(auxIdx);
-        if (!aux.chain->fxChain()) {
+        if (!aux.chain || !aux.chain->fxChain()) {
             continue;
         }
 
@@ -338,7 +357,7 @@ void Mixer::processAuxChannels(float* buffer, samples_t samplesPerChannel)
     const size_t outBufferSize = samplesPerChannel * m_outputSpec.audioChannelCount;
 
     for (TrackData& aux : m_auxTracks) {
-        if (!aux.chain->fxChain()) {
+        if (!aux.chain || !aux.chain->fxChain()) {
             continue;
         }
 
@@ -400,7 +419,11 @@ std::string Mixer::dump() const
     ss << std::string(indent, ' ') << "auxs: " << m_auxTracks.size();
     for (const auto& aux : m_auxTracks) {
         ss << "\n";
-        ss << std::string(indent, ' ') << "<--[" << aux.trackId << "] " << aux.chain->dump();
+        if (aux.chain) {
+            ss << std::string(indent, ' ') << "<--[" << aux.trackId << "] " << aux.chain->dump();
+        } else {
+            ss << std::string(indent, ' ') << "<--[empty]";
+        }
     }
 
     return ss.str();

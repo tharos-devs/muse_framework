@@ -58,7 +58,7 @@ public:
     void init();
 
     Ret addTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends);
-    Ret addAuxTrack(TrackChainPtr trackChain, bool isGroupBus);
+    Ret addAuxTrack(TrackChainPtr trackChain, bool isGroupBus, aux_channel_idx_t auxChannelIndex);
     Ret removeTrack(const TrackId trackId);
 
     void setAuxSends(const TrackId trackId, const AuxSendsParams& auxSends);
