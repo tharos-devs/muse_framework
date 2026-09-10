@@ -169,15 +169,27 @@ async::Channel<OutputSpec> AudioEngine::outputSpecChanged() const
 
 void AudioEngine::execOperation(OperationType type, const Operation& func)
 {
+    //! NOTE: the flag must be published BEFORE we wait out any in-flight process() call, not
+    //! after - process() reads m_operationType once, at entry, to decide whether to take
+    //! m_quickOperationWaitMutex before touching the mixer. Setting the flag only after this
+    //! wait left a window where a process() call already past that read (still "in flight",
+    //! i.e. m_processing was true when we checked) had already committed to the old value -
+    //! usually the un-locked NoOperation path - while we went on to lock the mutex and run
+    //! func() (e.g. GainNode::setGain()) concurrently with that call's mixer->process(), a
+    //! genuine unsynchronized read/write race that could apply a control-param change (gain,
+    //! volume, pan, ...) mid-buffer or drop it for that pass. Publishing the flag first and
+    //! only then waiting for m_processing to clear guarantees any process() call still capable
+    //! of seeing the OLD value has fully finished before func() runs, and every call that
+    //! starts afterwards observes the new type
+    m_operationType = type;
+    AudioSanitizer::setOperationType(type);
+
     // wait end of processing
     while (m_processing) {
         LOGD() << "wait end of processing";
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1ms);
     }
-
-    m_operationType = type;
-    AudioSanitizer::setOperationType(type);
 
     if (m_operationType == OperationType::QuickOperation) {
         m_quickOperationWaitMutex.lock();
