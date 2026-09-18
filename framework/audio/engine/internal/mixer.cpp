@@ -45,6 +45,14 @@ constexpr size_t MIN_TRACK_COUNT_FOR_MULTITHREADING = 2;
 //! but an unusually long one can still be truncated
 constexpr float AUX_SILENCE_GRACE_SECONDS = 6.f;
 
+static bool isChainSilent(const TrackChainPtr& chain)
+{
+    if (auto signal = chain->signal()) {
+        return signal->isSilent();
+    }
+    return false;
+}
+
 Mixer::~Mixer()
 {
     ONLY_AUDIO_MAIN_OR_ENGINE_THREAD;
@@ -179,11 +187,9 @@ void Mixer::process(float* outBuffer, samples_t samplesPerChannel)
         }
 
         //! NOTE If the signal is silent, do not write to the output buffer
-        // and don't process aux tracks
-        if (auto signal = t.chain->signal()) {
-            if (signal->isSilent()) {
-                continue;
-            }
+        //! or the aux buffers
+        if (isChainSilent(t.chain)) {
+            continue;
         }
 
         const AuxSendsParams& auxSends = m_auxSends[t.trackId];

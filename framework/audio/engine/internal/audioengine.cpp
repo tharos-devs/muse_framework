@@ -181,6 +181,8 @@ void AudioEngine::execOperation(OperationType type, const Operation& func)
     //! only then waiting for m_processing to clear guarantees any process() call still capable
     //! of seeing the OLD value has fully finished before func() runs, and every call that
     //! starts afterwards observes the new type
+    OperationType oldOperationType = m_operationType;
+
     m_operationType = type;
     AudioSanitizer::setOperationType(type);
 
@@ -200,8 +202,9 @@ void AudioEngine::execOperation(OperationType type, const Operation& func)
     if (m_operationType == OperationType::QuickOperation) {
         m_quickOperationWaitMutex.unlock();
     }
-    m_operationType = OperationType::NoOperation;
-    AudioSanitizer::setOperationType(OperationType::NoOperation);
+
+    m_operationType = oldOperationType;
+    AudioSanitizer::setOperationType(oldOperationType);
 }
 
 samples_t AudioEngine::fillSilent(float* buffer, samples_t samplesPerChannel)

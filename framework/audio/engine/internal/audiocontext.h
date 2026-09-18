@@ -87,6 +87,7 @@ public:
     void setAuxSendsParams(const TrackId trackId, const AuxSendsParams& params) override;
 
     async::Channel<TrackId, AudioSourceParams> sourceParamsChanged() const override;
+    async::Channel<TrackId, ControlParams> controlParamsChanged() const override;
     async::Channel<TrackId, AudioFxChain> fxChainParamsChanged() const override;
     async::Channel<TrackId, AuxSendsParams> auxSendsParamsChanged() const override;
 
@@ -188,6 +189,7 @@ private:
     async::Channel<TrackId> m_trackRemoved;
 
     async::Channel<TrackId, AudioSourceParams> m_sourceParamsChanged;
+    async::Channel<TrackId, ControlParams> m_controlParamsChanged;
     async::Channel<TrackId, AudioFxChain> m_fxChainParamsChanged;
     async::Channel<TrackId, AuxSendsParams> m_auxSendsParamsChanged;
 

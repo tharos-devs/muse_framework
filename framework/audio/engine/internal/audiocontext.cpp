@@ -103,6 +103,7 @@ void AudioContext::deinit()
 
     m_saveSoundTracksProgress = SaveSoundTrackProgressData();
     m_sourceParamsChanged = async::Channel<TrackId, AudioSourceParams>();
+    m_controlParamsChanged = async::Channel<TrackId, ControlParams>();
     m_fxChainParamsChanged = async::Channel<TrackId, AudioFxChain>();
     m_auxSendsParamsChanged = async::Channel<TrackId, AuxSendsParams>();
 
@@ -567,6 +568,7 @@ void AudioContext::setSourceParams(const TrackId trackId, const AudioSourceParam
     if (Track* t = track(trackId)) {
         if (t->params.source != params) {
             onSourceParamsChanged(*t, params);
+            m_sourceParamsChanged.send(trackId, t->params.source);
         }
     }
 }
@@ -577,6 +579,7 @@ void AudioContext::setControlParams(const TrackId trackId, const ControlParams& 
     if (Track* t = track(trackId)) {
         if (t->params.control != params) {
             onControlParamsChanged(*t, params);
+            m_controlParamsChanged.send(trackId, t->params.control);
         }
     }
 }
@@ -587,6 +590,7 @@ void AudioContext::setFxChainParams(const TrackId trackId, const AudioFxChain& p
     if (Track* t = track(trackId)) {
         if (t->params.fxChain != params) {
             onFxChainParamsChanged(*t, params);
+            m_fxChainParamsChanged.send(trackId, t->params.fxChain);
         }
     }
 }
@@ -597,6 +601,7 @@ void AudioContext::setAuxSendsParams(const TrackId trackId, const AuxSendsParams
     if (Track* t = track(trackId)) {
         if (t->params.auxSends != params) {
             onAuxSendsParamsChanged(*t, params);
+            m_auxSendsParamsChanged.send(trackId, t->params.auxSends);
         }
     }
 }
@@ -605,6 +610,12 @@ async::Channel<TrackId, AudioSourceParams> AudioContext::sourceParamsChanged() c
 {
     ONLY_AUDIO_ENGINE_THREAD;
     return m_sourceParamsChanged;
+}
+
+async::Channel<TrackId, ControlParams> AudioContext::controlParamsChanged() const
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+    return m_controlParamsChanged;
 }
 
 async::Channel<TrackId, AudioFxChain> AudioContext::fxChainParamsChanged() const

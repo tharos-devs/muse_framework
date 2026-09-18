@@ -92,6 +92,7 @@ enum class MsgCode {
     // notification
     SourceParamsChanged,
     FxChainParamsChanged,
+    ControlParamsChanged,
     AuxSendsParamsChanged,
 
     // Input processing
@@ -191,6 +192,7 @@ inline std::string to_string(MsgCode m)
     // notification
     case MsgCode::SourceParamsChanged: return "SourceParamsChanged";
     case MsgCode::FxChainParamsChanged: return "FxChainParamsChanged";
+    case MsgCode::ControlParamsChanged: return "ControlParamsChanged";
     case MsgCode::AuxSendsParamsChanged: return "AuxSendsParamsChanged";
 
     // Input processing
