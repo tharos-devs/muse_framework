@@ -129,6 +129,8 @@ signals:
 private:
     void componentComplete() override;
 
+    Location actualLocation(const DockBase* dock) const;
+
     void reorderSections();
     void doReorderSections();
     void reorderDocksNavigationSections(QList<DockBase*>& docks);

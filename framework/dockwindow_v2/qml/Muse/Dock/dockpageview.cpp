@@ -22,6 +22,7 @@
 
 #include "dockpageview.h"
 
+#include <QRect>
 #include <QTimer>
 
 #include "docktoolbarview.h"
@@ -195,12 +196,56 @@ DockPanelView* DockPageView::findPanelForTab(const DockPanelView* tab) const
 {
     for (DockPanelView* destinationPanel: panels()) {
         if (destinationPanel->isTabAllowed(tab)
-            && destinationPanel->location() == tab->location()) {
+            && actualLocation(destinationPanel) == tab->location()) {
             return destinationPanel;
         }
     }
 
     return nullptr;
+}
+
+Location DockPageView::actualLocation(const DockBase* dock) const
+{
+    IF_ASSERT_FAILED(dock) {
+        return Location::Undefined;
+    }
+
+    //! NOTE: DockBase::location() only ever reflects the panel's declared default
+    //! (dropcontroller.cpp never calls setLocation() on drag-and-drop redocking), so
+    //! a panel dragged to a different area still reports its original location. Derive
+    //! the panel's real current side from its live frame geometry instead, so reopening
+    //! a sibling panel (e.g. Mixer) tabs it alongside where this one actually is, not
+    //! where it used to be declared.
+    const DockBase* central = centralDock();
+    if (!central) {
+        return dock->location();
+    }
+
+    QRect geometry = dock->frameGeometry();
+    QRect centralGeometry = central->frameGeometry();
+
+    if (geometry.isEmpty() || centralGeometry.isEmpty()) {
+        //! NOTE: not currently laid out (e.g. closed) - fall back to the declared default
+        return dock->location();
+    }
+
+    if (geometry.right() <= centralGeometry.left()) {
+        return Location::Left;
+    }
+
+    if (geometry.left() >= centralGeometry.right()) {
+        return Location::Right;
+    }
+
+    if (geometry.bottom() <= centralGeometry.top()) {
+        return Location::Top;
+    }
+
+    if (geometry.top() >= centralGeometry.bottom()) {
+        return Location::Bottom;
+    }
+
+    return Location::Center;
 }
 
 bool DockPageView::isDockOpen(const QString& dockName) const
