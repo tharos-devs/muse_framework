@@ -232,6 +232,7 @@ private:
     bool m_floating = false;
 
     bool m_inited = false;
+    bool m_skipNextSizeCorrection = false;
     KDDockWidgets::DockWidgetQuick* m_dockWidget = nullptr;
 
     ui::NavigationSection* m_navigationSection = nullptr;

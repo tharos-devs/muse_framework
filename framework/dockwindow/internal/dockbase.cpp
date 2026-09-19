@@ -433,7 +433,23 @@ void DockBase::init()
     setVisible(m_dockWidget->isOpen());
     setInited(true);
 
+    //! NOTE: right after a saved layout is restored, this dock's own
+    //! size-related QML bindings (minimumWidth/maximumWidth etc.) may not have
+    //! settled to their real values yet (e.g. they can depend on this dock's
+    //! own lazily-instantiated content, not loaded until just now) -- so this
+    //! first constraint check can see a stale/incomplete constraint and decide
+    //! this dock's already-correct, freshly-restored size is "out of range".
+    //! Correcting that via applySizeConstraints()'s layoutEqually() call would
+    //! redistribute this dock's whole immediate container, including sibling
+    //! docks that never had anything wrong with them, discarding their own
+    //! freshly-restored sizes as collateral damage. Skip that one-time
+    //! correction here; if a real constraint violation remains once the
+    //! bindings above settle, later minimumSizeChanged/maximumSizeChanged
+    //! signals still call applySizeConstraints() again and fix it then.
+    m_skipNextSizeCorrection = true;
     applySizeConstraints();
+    m_skipNextSizeCorrection = false;
+
     updateFloatingStatus();
 }
 
@@ -734,9 +750,18 @@ void DockBase::applySizeConstraints()
         return;
     }
 
+    if (m_skipNextSizeCorrection) {
+        return;
+    }
+
+    //! NOTE: only rebalance this dock's own immediate container, not the whole
+    //! layout tree. layoutEqually_recursive() also redistributes every nested
+    //! sibling container, which is more than needed to fix this one dock.
+    //! DockBase::resize() already relies on the same non-recursive
+    //! layoutEqually() for its own controlled resizing.
     if (const Layouting::Item* layout = frame->layoutItem()) {
         if (Layouting::ItemBoxContainer* container = layout->parentBoxContainer()) {
-            container->layoutEqually_recursive();
+            container->layoutEqually();
         }
     }
 }
