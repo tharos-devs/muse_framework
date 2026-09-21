@@ -194,6 +194,15 @@ void Mixer::process(float* outBuffer, samples_t samplesPerChannel)
 
         const AuxSendsParams& auxSends = m_auxSends[t.trackId];
 
+        //! NOTE: a track routed to a "group" bus has that bus as its ONLY path to master AND
+        //! to any other aux send - if that group bus is muted, the track is entirely silent,
+        //! including whatever it would otherwise also feed into an unrelated, unmuted Aux FX
+        //! bus (e.g. a shared reverb). Skip the track altogether rather than muting that Aux
+        //! FX track, which other, non-grouped tracks may still be legitimately sending to
+        if (isSilencedByMutedGroupBus(auxSends)) {
+            continue;
+        }
+
         //! NOTE: a track routed to a "group" bus has that bus as its ONLY path to master -
         //! skip its own direct mix so its signal doesn't ALSO leak straight to master in
         //! parallel (unlike a regular send/return aux bus, where both paths coexist by design)
@@ -401,6 +410,24 @@ bool Mixer::hasActiveGroupBusSend(const AuxSendsParams& auxSends) const
         if (send.active && !muse::is_zero(send.signalAmount) && m_auxTracks.at(i).isGroupBus) {
             return true;
         }
+    }
+
+    return false;
+}
+
+bool Mixer::isSilencedByMutedGroupBus(const AuxSendsParams& auxSends) const
+{
+    //! NOTE: a track is only ever routed to a single group bus (exclusive routing), so the
+    //! first active group send found is the one that determines whether the track is silent
+    for (aux_channel_idx_t i = 0; i < auxSends.size() && i < m_auxTracks.size(); ++i) {
+        const AuxSendParams& send = auxSends.at(i);
+        const TrackData& auxTrack = m_auxTracks.at(i);
+        if (!send.active || muse::is_zero(send.signalAmount) || !auxTrack.isGroupBus) {
+            continue;
+        }
+
+        AutomationControlNodePtr control = auxTrack.chain ? auxTrack.chain->control() : nullptr;
+        return control && control->muted();
     }
 
     return false;

@@ -83,6 +83,7 @@ private:
     void writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends);
     void processAuxChannels(float* buffer, samples_t samplesPerChannel);
     bool hasActiveGroupBusSend(const AuxSendsParams& auxSends) const;
+    bool isSilencedByMutedGroupBus(const AuxSendsParams& auxSends) const;
 
     bool useMultithreading() const;
 
