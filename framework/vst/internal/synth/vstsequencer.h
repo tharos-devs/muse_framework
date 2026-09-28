@@ -34,6 +34,11 @@ public:
 
     muse::audio::gain_t currentGain() const;
 
+    //! NOTE: the raw MIDI state (keyswitch, CC, program change) last sent strictly before the given position,
+    //! to re-send when playback starts mid-score or resumes after a pause (flushSound() resets CCs to their defaults)
+    //! Keyswitch note-offs are returned separately, so they can be sent a little later than their note-ons
+    void midiStateBefore(const audio::msecs_t position, EventSequence& onEvents, EventSequence& offEvents) const;
+
 private:
     void updateMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics) override;
     void updateOffStreamEvents(const mpe::PlaybackEventsMap& events) override;
@@ -42,12 +47,15 @@ private:
 
     void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicAutomationLayers& layers);
-    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, SostenutoTimeAndDurations& sostenutoTimeAndDurations);
+    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::timestamp_t notesOffset,
+                      SostenutoTimeAndDurations& sostenutoTimeAndDurations);
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                         const PluginParamValue value);
     void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta);
+    static mpe::timestamp_t midiMessagesNotesOffset(const mpe::PlaybackEventList& events);
+    void addMidiMessagesEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState);
     void addSostenutoEvents(EventSequenceMap& destination, const SostenutoTimeAndDurations& sostenutoTimeAndDurations);
 
     void sortNoteOnEventsByPitch(EventSequenceMap& destination);
@@ -64,5 +72,12 @@ private:
     bool m_inited = false;
     bool m_useDynamicEvents = false;
     ParamsMapping m_mapping;
+
+    struct MidiState {
+        EventSequence onEvents;
+        EventSequence offEvents;
+    };
+
+    std::map<audio::msecs_t, MidiState> m_midiStates;
 };
 }

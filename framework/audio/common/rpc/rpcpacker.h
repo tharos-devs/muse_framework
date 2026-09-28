@@ -123,6 +123,10 @@ void pack_custom(muse::msgpack::Packer& p, const muse::mpe::SyllableEvent& value
 void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::SyllableEvent& value);
 void pack_custom(muse::msgpack::Packer& p, const muse::mpe::ControllerChangeEvent& value);
 void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::ControllerChangeEvent& value);
+void pack_custom(muse::msgpack::Packer& p, const muse::mpe::MidiMessage& value);
+void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::MidiMessage& value);
+void pack_custom(muse::msgpack::Packer& p, const muse::mpe::MidiMessagesEvent& value);
+void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::MidiMessagesEvent& value);
 void pack_custom(muse::msgpack::Packer& p, const muse::mpe::PlaybackEvent& value);
 void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::PlaybackEvent& value);
 
@@ -592,6 +596,28 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::ControllerChang
     value.type = static_cast<muse::mpe::ControllerChangeEvent::Type>(type);
 }
 
+inline void pack_custom(muse::msgpack::Packer& p, const muse::mpe::MidiMessage& value)
+{
+    p.process(static_cast<uint8_t>(value.type), value.number, value.value);
+}
+
+inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::MidiMessage& value)
+{
+    uint8_t type = 0;
+    p.process(type, value.number, value.value);
+    value.type = static_cast<muse::mpe::MidiMessage::Type>(type);
+}
+
+inline void pack_custom(muse::msgpack::Packer& p, const muse::mpe::MidiMessagesEvent& value)
+{
+    p.process(value.messages, value.messagesOffset, value.notesOffset, value.layerIdx);
+}
+
+inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::MidiMessagesEvent& value)
+{
+    p.process(value.messages, value.messagesOffset, value.notesOffset, value.layerIdx);
+}
+
 inline void pack_custom(muse::msgpack::Packer& p, const muse::mpe::PlaybackEvent& value)
 {
     uint8_t idx = static_cast<uint8_t>(value.index());
@@ -619,6 +645,10 @@ inline void pack_custom(muse::msgpack::Packer& p, const muse::mpe::PlaybackEvent
     } break;
     case 5: {
         const muse::mpe::ControllerChangeEvent& event = std::get<muse::mpe::ControllerChangeEvent>(value);
+        p.process(event);
+    } break;
+    case 6: {
+        const muse::mpe::MidiMessagesEvent& event = std::get<muse::mpe::MidiMessagesEvent>(value);
         p.process(event);
     } break;
     default: {
@@ -658,6 +688,11 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::PlaybackEvent& 
     } break;
     case 5: {
         muse::mpe::ControllerChangeEvent event;
+        p.process(event);
+        value = event;
+    } break;
+    case 6: {
+        muse::mpe::MidiMessagesEvent event;
         p.process(event);
         value = event;
     } break;

@@ -25,6 +25,7 @@
 #include "global/interpolation.h"
 
 #include <map>
+#include <optional>
 
 using namespace muse;
 using namespace muse::vst;
@@ -41,6 +42,12 @@ static const mpe::ArticulationTypeSet SUSTAIN_PEDAL_CC_SUPPORTED_TYPES {
 static const mpe::ArticulationTypeSet SOSTENUTO_PEDAL_CC_SUPPORTED_TYPES {
     mpe::ArticulationType::LaissezVibrer,
 };
+
+//! NOTE: keyswitches are sent as short notes rather than held until the next articulation change,
+//! so no keyswitch can be left hanging if playback stops in between
+static constexpr mpe::timestamp_t KEYSWITCH_NOTE_DURATION_US = 10000;
+static constexpr uint8_t DEFAULT_KEYSWITCH_VELOCITY = 100;
+static constexpr ControlIdx PROGRAM_CHANGE_IDX = static_cast<ControlIdx>(Steinberg::Vst::kCtrlProgramChange);
 
 static const mpe::ArticulationTypeSet BEND_SUPPORTED_TYPES {
     mpe::ArticulationType::Multibend, mpe::ArticulationType::ContinuousGlissando,
@@ -69,6 +76,7 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
 
     addPlaybackEvents(m_mainStreamEvents, events);
     sortNoteOnEventsByPitch(m_mainStreamEvents);
+    addMidiMessagesEvents(m_mainStreamEvents, events, true /*recordState*/);
 
     if (m_useDynamicEvents) {
         addDynamicEvents(m_mainStreamEvents, dynamics);
@@ -80,6 +88,7 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
 void VstSequencer::updateOffStreamEvents(const mpe::PlaybackEventsMap& events)
 {
     addPlaybackEvents(m_offStreamEvents, events);
+    addMidiMessagesEvents(m_offStreamEvents, events, false /*recordState*/);
     updateOffSequenceIterator();
 }
 
@@ -113,9 +122,11 @@ void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::P
     SostenutoTimeAndDurations sostenutoTimeAndDurations;
 
     for (const auto& evPair : events) {
+        const mpe::timestamp_t notesOffset = midiMessagesNotesOffset(evPair.second);
+
         for (const mpe::PlaybackEvent& event : evPair.second) {
             if (std::holds_alternative<mpe::NoteEvent>(event)) {
-                addNoteEvent(destination, std::get<mpe::NoteEvent>(event), sostenutoTimeAndDurations);
+                addNoteEvent(destination, std::get<mpe::NoteEvent>(event), notesOffset, sostenutoTimeAndDurations);
             } else if (std::holds_alternative<mpe::ControllerChangeEvent>(event)) {
                 addControlChangeEvent(destination, evPair.first, std::get<mpe::ControllerChangeEvent>(event));
             }
@@ -159,9 +170,18 @@ void VstSequencer::addDynamicEvents(EventSequenceMap& destination, const mpe::Dy
     }
 }
 
-void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent,
+void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& originNoteEvent, const mpe::timestamp_t notesOffset,
                                 SostenutoTimeAndDurations& sostenutoTimeAndDurations)
 {
+    std::optional<mpe::NoteEvent> shiftedNoteEvent;
+    if (notesOffset != 0) {
+        mpe::ArrangementContext shiftedCtx = originNoteEvent.arrangementCtx();
+        shiftedCtx.actualTimestamp = std::max(shiftedCtx.actualTimestamp + notesOffset, mpe::timestamp_t(0));
+        shiftedNoteEvent.emplace(std::move(shiftedCtx), mpe::PitchContext(originNoteEvent.pitchCtx()),
+                                 mpe::ExpressionContext(originNoteEvent.expressionCtx()));
+    }
+
+    const mpe::NoteEvent& noteEvent = shiftedNoteEvent ? *shiftedNoteEvent : originNoteEvent;
     const mpe::ArrangementContext& arrangementCtx = noteEvent.arrangementCtx();
     const int32_t noteId = noteIndex(noteEvent.pitchCtx().nominalPitchLevel);
     const float velocityFraction = noteVelocityFraction(noteEvent);
@@ -309,6 +329,102 @@ void VstSequencer::addPitchCurve(EventSequenceMap& destination, const mpe::NoteE
             }
 
             prevBendValue = bendValue;
+        }
+    }
+}
+
+void VstSequencer::midiStateBefore(const audio::msecs_t position, EventSequence& onEvents, EventSequence& offEvents) const
+{
+    auto it = m_midiStates.lower_bound(position);
+    if (it == m_midiStates.cbegin()) {
+        return;
+    }
+
+    const MidiState& state = std::prev(it)->second;
+    onEvents.insert(onEvents.end(), state.onEvents.cbegin(), state.onEvents.cend());
+    offEvents.insert(offEvents.end(), state.offEvents.cbegin(), state.offEvents.cend());
+}
+
+mpe::timestamp_t VstSequencer::midiMessagesNotesOffset(const mpe::PlaybackEventList& events)
+{
+    for (const mpe::PlaybackEvent& event : events) {
+        if (std::holds_alternative<mpe::MidiMessagesEvent>(event)) {
+            return std::get<mpe::MidiMessagesEvent>(event).notesOffset;
+        }
+    }
+
+    return 0;
+}
+
+//! NOTE: must run after sortNoteOnEventsByPitch(), so keyswitch notes stay in front of the notes
+//! starting at the same time, whatever their pitch
+//! Messages identical to the previous ones are skipped: an articulation is only (re)sent when it actually changes
+void VstSequencer::addMidiMessagesEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState)
+{
+    if (recordState) {
+        m_midiStates.clear();
+    }
+
+    const std::vector<mpe::MidiMessage>* lastMessages = nullptr;
+
+    for (const auto& [timestamp, eventList] : events) {
+        for (const mpe::PlaybackEvent& event : eventList) {
+            if (!std::holds_alternative<mpe::MidiMessagesEvent>(event)) {
+                continue;
+            }
+
+            const mpe::MidiMessagesEvent& midiEvent = std::get<mpe::MidiMessagesEvent>(event);
+            if (lastMessages && *lastMessages == midiEvent.messages) {
+                continue;
+            }
+
+            lastMessages = &midiEvent.messages;
+
+            EventSequence onEvents;
+            EventSequence offEvents;
+
+            for (const mpe::MidiMessage& message : midiEvent.messages) {
+                switch (message.type) {
+                case mpe::MidiMessage::Type::Note: {
+                    const uint8_t velocity = message.value > 0 ? message.value : DEFAULT_KEYSWITCH_VELOCITY;
+                    const float velocityFraction = std::min(velocity, uint8_t(127)) / 127.f;
+                    onEvents.emplace_back(buildEvent(VstEvent::kNoteOnEvent, message.number, velocityFraction, 0.f));
+                    offEvents.emplace_back(buildEvent(VstEvent::kNoteOffEvent, message.number, velocityFraction, 0.f));
+                } break;
+                case mpe::MidiMessage::Type::ControlChange:
+                case mpe::MidiMessage::Type::ProgramChange: {
+                    const ControlIdx controlIdx = message.type == mpe::MidiMessage::Type::ControlChange
+                                                  ? static_cast<ControlIdx>(message.number)
+                                                  : PROGRAM_CHANGE_IDX;
+                    const uint8_t value = message.type == mpe::MidiMessage::Type::ControlChange ? message.value : message.number;
+
+                    auto controlIt = m_mapping.find(controlIdx);
+                    if (controlIt == m_mapping.cend()) {
+                        break;
+                    }
+
+                    onEvents.emplace_back(ParamChangeEvent { controlIt->second, std::min(value, uint8_t(127)) / 127. });
+                } break;
+                }
+            }
+
+            if (onEvents.empty()) {
+                continue;
+            }
+
+            const mpe::timestamp_t sendAt = std::max(timestamp + midiEvent.notesOffset + midiEvent.messagesOffset, mpe::timestamp_t(0));
+
+            EventSequence& onSequence = destination[sendAt];
+            onSequence.insert(onSequence.begin(), onEvents.cbegin(), onEvents.cend());
+
+            if (!offEvents.empty()) {
+                EventSequence& offSequence = destination[sendAt + KEYSWITCH_NOTE_DURATION_US];
+                offSequence.insert(offSequence.begin(), offEvents.cbegin(), offEvents.cend());
+            }
+
+            if (recordState) {
+                m_midiStates.insert_or_assign(sendAt, MidiState { std::move(onEvents), std::move(offEvents) });
+            }
         }
     }
 }

@@ -69,6 +69,7 @@ private:
 
     void toggleVolumeGain(const bool isActive);
     audio::samples_t processSequence(const VstSequencer::EventSequence& sequence, const audio::samples_t samples, float* buffer);
+    void applyMidiStateChase(VstSequencer::EventSequenceMap& sequences);
 
     IVstPluginInstancePtr m_pluginPtr = nullptr;
     std::unique_ptr<VstAudioClient> m_vstAudioClient = nullptr;
@@ -83,6 +84,9 @@ private:
     bool m_useDynamicEvents = false;
 
     audio::TimePosition m_currentPosition;
+
+    bool m_midiStateChasePending = false;
+    VstSequencer::EventSequence m_pendingChaseOffEvents;
 };
 
 using VstSynthPtr = std::shared_ptr<VstSynthesiser>;

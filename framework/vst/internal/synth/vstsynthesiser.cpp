@@ -29,13 +29,20 @@ using namespace muse::audio::synth;
 using namespace muse::audio;
 using namespace muse::audioplugins;
 
-static const std::set<Steinberg::Vst::CtrlNumber> SUPPORTED_CONTROLLERS = {
-    Steinberg::Vst::kCtrlVolume,
-    Steinberg::Vst::kCtrlExpression,
-    Steinberg::Vst::kCtrlSustainOnOff,
-    Steinberg::Vst::kCtrlSustenutoOnOff,
-    Steinberg::Vst::kPitchBend,
-};
+//! NOTE: every MIDI CC is mapped, not just the ones MuseScore drives itself,
+//! so that raw MIDI messages (e.g. articulation changes) can reach any controller
+static std::set<Steinberg::Vst::CtrlNumber> supportedControllers()
+{
+    std::set<Steinberg::Vst::CtrlNumber> result;
+    for (Steinberg::Vst::CtrlNumber ctrl = 0; ctrl < Steinberg::Vst::kCountCtrlNumber; ++ctrl) {
+        result.insert(ctrl);
+    }
+    result.insert(Steinberg::Vst::kCtrlProgramChange);
+
+    return result;
+}
+
+static const std::set<Steinberg::Vst::CtrlNumber> SUPPORTED_CONTROLLERS = supportedControllers();
 
 VstSynthesiser::VstSynthesiser(const TrackId trackId, const muse::audio::AudioInputParams& params)
     : AbstractSynthesizer(params),
@@ -154,6 +161,12 @@ void VstSynthesiser::setMode(const muse::audio::ProcessMode mode)
 
     bool isActive = isModePlaying(mode);
     m_sequencer.setActive(isActive);
+    m_midiStateChasePending = isActive;
+    // Stopping flushes every playing note anyway: a keyswitch note-off still waiting must not
+    // come out later, together with the next chase's note-on of the same keyswitch
+    if (!isActive) {
+        m_pendingChaseOffEvents.clear();
+    }
     toggleVolumeGain(isActive);
     m_vstAudioClient->setIsPlaying(isActive);
     m_vstAudioClient->setIsActive(isActive);
@@ -185,6 +198,7 @@ void VstSynthesiser::setPlaybackPosition(const muse::audio::TimePosition& positi
 
     if (m_sequencer.isActive()) {
         m_vstAudioClient->setVolumeGain(m_sequencer.currentGain());
+        m_midiStateChasePending = true;
     }
 }
 
@@ -203,8 +217,12 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
     }
 
     const msecs_t nextMsecs = samplesToMsecs(samplesPerChannel, m_outputSpec.sampleRate);
-    const VstSequencer::EventSequenceMap sequences = m_sequencer.movePlaybackForward(nextMsecs);
+    VstSequencer::EventSequenceMap sequences = m_sequencer.movePlaybackForward(nextMsecs);
     const bool active = m_sequencer.isActive();
+
+    if (active) {
+        applyMidiStateChase(sequences);
+    }
 
     samples_t sampleOffset = 0;
     samples_t processedSamples = 0;
@@ -231,6 +249,40 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
     }
 
     return processedSamples;
+}
+
+//! NOTE: re-sends the articulation (keyswitch/CC) that should be active at the start position,
+//! since playback may start mid-score, and pausing resets the plugin's CCs to their defaults.
+//! Keyswitch note-offs go out on the next block, so they never arrive at the same time as their note-on
+void VstSynthesiser::applyMidiStateChase(VstSequencer::EventSequenceMap& sequences)
+{
+    if (sequences.empty()) {
+        return;
+    }
+
+    VstSequencer::EventSequence& firstSequence = sequences.begin()->second;
+
+    if (!m_midiStateChasePending) {
+        // Note-offs of the previous block's chase
+        if (!m_pendingChaseOffEvents.empty()) {
+            firstSequence.insert(firstSequence.begin(), m_pendingChaseOffEvents.cbegin(), m_pendingChaseOffEvents.cend());
+            m_pendingChaseOffEvents.clear();
+        }
+        return;
+    }
+
+    m_midiStateChasePending = false;
+
+    // A new chase (e.g. a seek right after the previous one) while note-offs are still waiting: send
+    // those first, *before* the new keyswitch note-ons - off then on is a valid retrigger, the reverse
+    // would cut the new keyswitch right away
+    const VstSequencer::EventSequence staleOffEvents = std::move(m_pendingChaseOffEvents);
+    m_pendingChaseOffEvents.clear();
+
+    VstSequencer::EventSequence onEvents;
+    m_sequencer.midiStateBefore(sequences.begin()->first, onEvents, m_pendingChaseOffEvents);
+    firstSequence.insert(firstSequence.begin(), onEvents.cbegin(), onEvents.cend());
+    firstSequence.insert(firstSequence.begin(), staleOffEvents.cbegin(), staleOffEvents.cend());
 }
 
 samples_t VstSynthesiser::processSequence(const VstSequencer::EventSequence& sequence, const samples_t samples, float* buffer)

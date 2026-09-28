@@ -332,12 +332,48 @@ struct SyllableEvent {
 
 using SyllableEventList = std::vector<SyllableEvent>;
 
+//! NOTE: raw MIDI messages sent as-is to a plugin, e.g. to switch
+//! a sample library's articulation via keyswitch notes, CC or program change
+struct MidiMessage {
+    enum class Type : unsigned char {
+        Note = 0,
+        ControlChange,
+        ProgramChange,
+    };
+
+    Type type = Type::Note;
+    uint8_t number = 0; // note pitch, controller number or program number
+    uint8_t value = 0; // note velocity or controller value, unused for program change
+
+    bool operator==(const MidiMessage& m) const
+    {
+        return type == m.type && number == m.number && value == m.value;
+    }
+};
+
+//! NOTE: meant to be stored at the same timestamp as the notes it applies to
+struct MidiMessagesEvent {
+    std::vector<MidiMessage> messages;
+    timestamp_t messagesOffset = 0; // when to send the messages, relative to the event's timestamp (e.g. a keyswitch sent ahead)
+    timestamp_t notesOffset = 0; // shift for the notes stored at the same timestamp (e.g. to compensate a legato's slow attack)
+    layer_idx_t layerIdx = 0;
+
+    bool operator==(const MidiMessagesEvent& e) const
+    {
+        return messages == e.messages && messagesOffset == e.messagesOffset && notesOffset == e.notesOffset
+               && layerIdx == e.layerIdx;
+    }
+};
+
+using MidiMessagesEventList = std::vector<MidiMessagesEvent>;
+
 using PlaybackEvent = std::variant<std::monostate,
                                    NoteEvent,
                                    TextArticulationEvent,
                                    SoundPresetChangeEvent,
                                    SyllableEvent,
-                                   ControllerChangeEvent>;
+                                   ControllerChangeEvent,
+                                   MidiMessagesEvent>;
 
 using PlaybackEventList = std::vector<PlaybackEvent>;
 using PlaybackEventsMap = SharedMap<timestamp_t, PlaybackEventList>;
