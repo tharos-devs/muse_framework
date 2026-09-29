@@ -38,6 +38,9 @@ FocusScope {
 
     property int icon: IconCode.NONE
     property string text: ""
+    //! NOTE: when >= 0, the text always takes exactly this width (cut off, without ellipsis, if longer),
+    //! so the button keeps the same size whatever text it shows
+    property real textWidth: -1
 
     property bool checked: false
 
@@ -169,8 +172,13 @@ FocusScope {
 
                 StyledTextLabel {
                     Layout.alignment: Qt.AlignVCenter
+                    Layout.preferredWidth: root.textWidth >= 0 ? root.textWidth : implicitWidth
                     text: root.text
                     font: ui.theme.bodyFont
+                    elide: root.textWidth >= 0 ? Text.ElideNone : Text.ElideRight
+                    clip: root.textWidth >= 0
+                    // Cut off on the right only
+                    horizontalAlignment: root.textWidth >= 0 ? Text.AlignLeft : Text.AlignHCenter
                     visible: !isEmpty
                 }
             }
