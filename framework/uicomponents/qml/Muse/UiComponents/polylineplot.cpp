@@ -1018,8 +1018,16 @@ bool PolylinePlot::isNearLinePx(const QPointF& px) const
     return best <= m_hitRadius;
 }
 
+void PolylinePlot::setLockedPoints(const QVector<bool>& locked)
+{
+    m_lockedPoints = locked;
+}
+
 int PolylinePlot::pointIndexAtPx(const QPointF& px) const
 {
+    const bool hasLockedFlags = m_lockedPoints.size() == m_points.size();
+    int firstLockedIdx = INVALID_POINT_IDX;
+
     // search in visible points, skip synthetic boundary points
     for (int i = 0; i < m_pointsNVisible.size(); ++i) {
         const int domainIdx = (i < m_visibleToDomainIndex.size()) ? m_visibleToDomainIndex[i] : INVALID_POINT_IDX;
@@ -1032,12 +1040,22 @@ int PolylinePlot::pointIndexAtPx(const QPointF& px) const
         const qreal y = toPxY(this, pN.y());
         const qreal dx = px.x() - x;
         const qreal dy = px.y() - y;
-        if ((dx * dx + dy * dy) <= (m_hitRadius * m_hitRadius)) {
-            return domainIdx;
+        if ((dx * dx + dy * dy) > (m_hitRadius * m_hitRadius)) {
+            continue;
         }
+
+        if (hasLockedFlags && m_lockedPoints[domainIdx]) {
+            // Keep looking for an overlapping unlocked point
+            if (firstLockedIdx == INVALID_POINT_IDX) {
+                firstLockedIdx = domainIdx;
+            }
+            continue;
+        }
+
+        return domainIdx;
     }
 
-    return INVALID_POINT_IDX;
+    return firstLockedIdx;
 }
 
 GhostPoint PolylinePlot::ghostPointToPolylinePx(const QPointF& px) const

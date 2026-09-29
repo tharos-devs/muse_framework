@@ -172,6 +172,11 @@ public:
     void setActivePointLabel(const QString&);
     void setValueLabelColors(const QColor& background, const QColor& text);
 
+    //! NOTE: one flag per point (same order as points()); where points overlap under the cursor, an unlocked
+    //! one is picked over a locked one (e.g. a point the user can't edit). Ignored when its size doesn't match
+    //! the current points, so it must be set again after every setPoints()
+    void setLockedPoints(const QVector<bool>& locked);
+
     void geometryChange(const QRectF& newG, const QRectF& oldG) override;
     void paint(QPainter* painter) override;
 
@@ -271,6 +276,7 @@ private:
     qreal m_snapThresholdPx = 7.0;
 
     QVector<QPointF> m_points;          // domain points as provided from model
+    QVector<bool> m_lockedPoints;
     QVector<QPointF> m_pointsNVisible;  // normalized points [0..1], cropped to frame boundaries (used for drawing only)
 
     // mapping for m_pointsNVisible -> index in m_points
