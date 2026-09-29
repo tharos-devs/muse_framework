@@ -26,6 +26,10 @@
 #include "vstpluginprovider.h"
 
 #include "async/async.h"
+#include "global/containers.h"
+
+#include <functional>
+#include <mutex>
 
 #include "defer.h"
 #include "log.h"
@@ -38,6 +42,39 @@ static const std::string_view COMPONENT_STATE_KEY = "componentState";
 static const std::string_view CONTROLLER_STATE_KEY = "controllerState";
 
 static VstPluginInstanceId s_lastId = 0;
+
+namespace {
+struct PendingCleanup {
+    std::function<void()> cleanup;
+    std::once_flag done;
+};
+
+std::mutex s_pendingCleanupsMutex;
+std::vector<std::shared_ptr<PendingCleanup> > s_pendingCleanups;
+
+//! NOTE: whichever comes first - the queued main-thread call or runPendingCleanups() - runs it, only once
+void runCleanup(const std::shared_ptr<PendingCleanup>& pending)
+{
+    std::call_once(pending->done, pending->cleanup);
+    pending->cleanup = nullptr; // releases what it captured (provider, module)
+
+    std::lock_guard lock(s_pendingCleanupsMutex);
+    muse::remove(s_pendingCleanups, pending);
+}
+}
+
+void VstPluginInstance::runPendingCleanups()
+{
+    std::vector<std::shared_ptr<PendingCleanup> > pendingCleanups;
+    {
+        std::lock_guard lock(s_pendingCleanupsMutex);
+        pendingCleanups = s_pendingCleanups;
+    }
+
+    for (const std::shared_ptr<PendingCleanup>& pending : pendingCleanups) {
+        runCleanup(pending);
+    }
+}
 
 static void stateBufferFromString(VstMemoryStream& buffer, char* strData, const size_t strSize)
 {
@@ -77,7 +114,8 @@ VstPluginInstance::~VstPluginInstance()
     auto securer = threadSecurer;
     auto repo = modulesRepo;
 
-    Async::call(nullptr, [resourceId, provider, module, securer, repo]() mutable {
+    auto pending = std::make_shared<PendingCleanup>();
+    pending->cleanup = [resourceId, provider, module, securer, repo]() mutable {
         ONLY_MAIN_THREAD(securer);
 
         repo()->removePluginModule(resourceId);
@@ -96,6 +134,15 @@ VstPluginInstance::~VstPluginInstance()
 
         provider.reset();
         module.reset();
+    };
+
+    {
+        std::lock_guard lock(s_pendingCleanupsMutex);
+        s_pendingCleanups.push_back(pending);
+    }
+
+    Async::call(nullptr, [pending]() {
+        runCleanup(pending);
     }, threadSecurer()->mainThreadId());
 }
 

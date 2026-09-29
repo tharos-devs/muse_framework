@@ -34,6 +34,7 @@
 
 #include "internal/vstconfiguration.h"
 #include "internal/vstinstancesregister.h"
+#include "internal/vstplugininstance.h"
 #include "internal/vstmodulesrepository.h"
 #include "internal/synth/vstiresolver.h"
 #include "internal/fx/vstfxresolver.h"
@@ -105,6 +106,9 @@ void VSTModule::onInit(const IApplication::RunMode&)
 
 void VSTModule::onDeinit()
 {
+    // Plugin instances destroyed by the audio engine teardown (just before) must be deactivated and release their
+    // module while the modules are still loaded
+    VstPluginInstance::runPendingCleanups();
     m_pluginModulesRepo->deInit();
 }
 

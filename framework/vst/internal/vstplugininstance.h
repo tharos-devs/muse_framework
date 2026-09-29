@@ -48,6 +48,11 @@ public:
     VstPluginInstance(const muse::audio::AudioResourceId& resourceId);
     ~VstPluginInstance() override;
 
+    //! NOTE: runs the main-thread cleanups (deactivation, module release) of destroyed instances that haven't run yet
+    //! - at shutdown the main event loop is gone, so they'd never run otherwise and the modules would never be
+    //! unloaded properly (some plugins, e.g. Kontakt, then crash in their own static teardown at exit)
+    static void runPendingCleanups();
+
     const muse::audio::AudioResourceId& resourceId() const override;
     const std::string& name() const override;
     VstPluginInstanceId id() const override;
