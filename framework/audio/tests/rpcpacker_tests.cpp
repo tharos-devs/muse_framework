@@ -799,13 +799,49 @@ TEST_F(Audio_RpcPackerTests, MPE_PlaybackEvent)
     // ControllerChangeEvent
     {
         mpe::ControllerChangeEvent event;
-        event.type = mpe::ControllerChangeEvent::Type::Modulation;
+        event.type = mpe::ControllerChangeEvent::Type::ControlChange;
         event.val = 0.4f;
         event.layerIdx = 2;
+        event.controller = 11;
 
         KNOWN_FIELDS(event,
                      event.type,
                      event.val,
+                     event.layerIdx,
+                     event.controller);
+
+        mpe::PlaybackEvent origin = event;
+
+        ByteArray data = rpc::RpcPacker::pack(origin);
+
+        mpe::PlaybackEvent unpacked;
+        bool ok = rpc::RpcPacker::unpack(data, unpacked);
+
+        EXPECT_TRUE(ok);
+        EXPECT_TRUE(origin == unpacked);
+    }
+
+    // MidiMessagesEvent
+    {
+        mpe::MidiMessagesEvent event;
+        event.messages = {
+            { mpe::MidiMessage::Type::Note, 24, 100 },
+            { mpe::MidiMessage::Type::ControlChange, 32, 64 },
+            { mpe::MidiMessage::Type::ProgramChange, 5, 0 },
+        };
+        event.messagesOffset = -20000;
+        event.notesOffset = 15000;
+        event.layerIdx = 3;
+
+        KNOWN_FIELDS(event.messages.front(),
+                     event.messages.front().type,
+                     event.messages.front().number,
+                     event.messages.front().value);
+
+        KNOWN_FIELDS(event,
+                     event.messages,
+                     event.messagesOffset,
+                     event.notesOffset,
                      event.layerIdx);
 
         mpe::PlaybackEvent origin = event;
@@ -825,7 +861,8 @@ TEST_F(Audio_RpcPackerTests, MPE_PlaybackEvent)
                                                 mpe::TextArticulationEvent,
                                                 mpe::SoundPresetChangeEvent,
                                                 mpe::SyllableEvent,
-                                                mpe::ControllerChangeEvent>;
+                                                mpe::ControllerChangeEvent,
+                                                mpe::MidiMessagesEvent>;
 
         static_assert(std::is_same<mpe::PlaybackEvent, KnownPlaybackEvent>::value);
     }
