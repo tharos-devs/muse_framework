@@ -81,6 +81,7 @@ void AudioEngine::deinit()
 
         for (auto& p : m_contexts) {
             p.second->deinit();
+            p.second->disconnect(m_mixer); // like destroyContext(): the mixer would keep the context alive
         }
         m_contexts.clear();
     }

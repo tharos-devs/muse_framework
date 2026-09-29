@@ -148,7 +148,9 @@ protected:
     bool m_enabled = true;
     bool m_bypassed = false;
 
-    std::vector<std::shared_ptr<IAudioNode> > m_connectedTo;
+    //! NOTE: weak - the graph is pulled from its output, so a node owns its input (m_input), never the node it
+    //! outputs to; two strong links per connection would make every chain keep itself alive once removed
+    std::vector<std::weak_ptr<IAudioNode> > m_connectedTo;
     std::shared_ptr<IAudioNode> m_input = nullptr;
 };
 
@@ -289,7 +291,10 @@ IAudioNode* AudioNode<T>::disconnect(std::shared_ptr<IAudioNode> other)
     }
     bool ok = other->doRemoveNode(shared_from_this());
     if (ok) {
-        muse::remove(m_connectedTo, other);
+        std::erase_if(m_connectedTo, [&other](const std::weak_ptr<IAudioNode>& connectedTo) {
+            const std::shared_ptr<IAudioNode> node = connectedTo.lock();
+            return !node || node == other;
+        });
         ANODE_LOG(name()) << "disconnected from: " << other->name();
     }
     return this;
@@ -300,8 +305,11 @@ void AudioNode<T>::disconnectAll()
 {
     auto copy = m_connectedTo;
     for (auto& connectedTo : copy) {
-        disconnect(connectedTo);
+        if (std::shared_ptr<IAudioNode> node = connectedTo.lock()) {
+            disconnect(node);
+        }
     }
+    m_connectedTo.clear();
 }
 
 template<typename T>
