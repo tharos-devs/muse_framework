@@ -159,6 +159,9 @@ protected:
 
     void unregisterService(const InterfaceInfo& info)
     {
+        //! NOTE: released only once the mutex is unlocked - if this was the last reference, the service's destructor
+        //! runs here, and it may well unsubscribe from other services (its own injects), which locks the mutex again
+        std::shared_ptr<IModuleInterface> released;
         std::map<int, OnChangedInternal> onChanges;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -167,6 +170,7 @@ protected:
                 return;
             }
 
+            released = std::move(it->second.p);
             it->second.p = nullptr;
             onChanges = it->second.onChanges;
         }
@@ -174,6 +178,8 @@ protected:
         for (const auto& c : onChanges) {
             c.second(nullptr);
         }
+
+        released.reset();
     }
 
     void registerService(const std::string& module,
