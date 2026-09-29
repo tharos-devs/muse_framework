@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include <functional>
+#include <optional>
+
 #include <QColor>
 #include <QPointF>
 #include <QQuickPaintedItem>
@@ -44,6 +47,18 @@ namespace muse::uicomponents {
 struct GhostPoint {
     QPointF point;
     qreal distToSegment = 1e18;
+};
+
+//! NOTE: the bend of the segment between two consecutive points: it passes through (t, value), where t is its position
+//! across the segment and value its fraction between the two points' values ([0; 1] both, (0.5, 0.5) = straight),
+//! drawn as two quadratic Bezier arcs meeting there - the same shape as muse::mpe::evaluateAt()
+struct SegmentBend {
+    qreal t = 0.5;
+    qreal value = 0.5;
+    bool editable = false; // shows a handle in its middle, dragged vertically to bend it (double-click: straight again)
+
+    bool isStraight() const { return qFuzzyCompare(t, 0.5) && qFuzzyCompare(value, 0.5); }
+    bool operator==(const SegmentBend& o) const { return t == o.t && value == o.value && editable == o.editable; }
 };
 
 class PolylinePlot : public QQuickPaintedItem, public muse::async::Asyncable, public muse::actions::Actionable, public muse::Contextable
@@ -177,6 +192,19 @@ public:
     //! the current points, so it must be set again after every setPoints()
     void setLockedPoints(const QVector<bool>& locked);
 
+    //! NOTE: one flag per point, same rules as setLockedPoints(): a hidden point is neither shown nor hit, but still
+    //! shapes the line (e.g. a neighbor outside of the visible range)
+    void setHiddenPoints(const QVector<bool>& hidden);
+
+    //! NOTE: one per segment (points().size() - 1, same order), ignored otherwise - so it must be set again after
+    //! every setPoints(). Points are expected sorted by x
+    void setSegmentBends(const QVector<SegmentBend>& bends);
+
+    //! NOTE: when the model's values are displayed through a non-linear scale (e.g. a fader curve), bends are computed
+    //! on the values themselves, as played - these convert a point's y to its value and back. Unset: y is the value
+    using ValueMapping = std::function<qreal (qreal)>;
+    void setValueMapping(ValueMapping yToValue, ValueMapping valueToY);
+
     void geometryChange(const QRectF& newG, const QRectF& oldG) override;
     void paint(QPainter* painter) override;
 
@@ -196,6 +224,8 @@ signals:
     void pointAdded(qreal x, qreal y, bool completed);
     void pointMoved(int index, qreal x, qreal y, bool completed);
     void pointRemoved(int index, bool completed);
+    //! NOTE: value is the new SegmentBend::value of the segment starting at point segmentIndex
+    void segmentBendMoved(int segmentIndex, qreal value, bool completed);
     void dragCancelled();
     void interactionFinished();
 
@@ -229,6 +259,15 @@ private:
     bool isNearLinePx(const QPointF& px) const;
     GhostPoint ghostPointToPolylinePx(const QPointF& px) const;
     int pointIndexAtPx(const QPointF& px) const;
+    int bendHandleIndexAtPx(const QPointF& px) const;
+    int segmentIndexAtPx(const QPointF& px) const;
+    std::optional<QPointF> bendHandleN(int segmentIndex) const;
+    bool hasSegmentBends() const;
+    bool isHiddenPoint(int index) const;
+    QVector<QPointF> linePx(QVector<int>* colorIndices) const;
+    qreal toValue(qreal y) const;
+    qreal fromValue(qreal value) const;
+    qreal bentY(const QPointF& from, const QPointF& to, const SegmentBend& bend, qreal s) const;
 
     void updateCursor();
     void resetGestureState();
@@ -255,6 +294,7 @@ private:
     void updateActivePoint();
 
     void drawLinesAndFillUnder(QPainter* painter) const;
+    void paintBendHandles(QPainter* painter) const;
     void paintPoint(QPainter* painter, const PolylinePointStyle* style, const QPointF& centre, bool useHoveredStyle) const;
     void paintValueLabel(QPainter* painter) const;
 
@@ -277,6 +317,15 @@ private:
 
     QVector<QPointF> m_points;          // domain points as provided from model
     QVector<bool> m_lockedPoints;
+    QVector<bool> m_hiddenPoints;
+    QVector<SegmentBend> m_segmentBends;
+    ValueMapping m_yToValue;
+    ValueMapping m_valueToY;
+
+    //! NOTE: the line actually drawn, bends sampled: normalized, sorted by x, each with the index (into
+    //! m_colorsUnderLine) of the color under the stretch starting there
+    QVector<QPointF> m_linePointsN;
+    QVector<int> m_lineColorIndices;
     QVector<QPointF> m_pointsNVisible;  // normalized points [0..1], cropped to frame boundaries (used for drawing only)
 
     // mapping for m_pointsNVisible -> index in m_points
@@ -311,6 +360,11 @@ private:
     QPointF m_draggedPointDomain;
 
     bool m_movedSincePress = false;
+
+    int m_pressedBendIndex = -1;
+    qreal m_pressedBendOriginalValue = 0.5; // restored if the drag is cancelled
+    int m_hoveredBendIndex = -1;
+    int m_hoveredSegmentIndex = -1; // the segment under the cursor on the line: reveals its bend handle
 
     bool m_hasActivePoint = false;
     QPointF m_activePointPx;

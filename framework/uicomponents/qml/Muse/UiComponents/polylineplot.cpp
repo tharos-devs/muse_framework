@@ -148,6 +148,39 @@ static double valueAtX(const QVector<QPointF>& sortedPoints, double x)
 
     return sortedPoints.back().y();
 }
+
+//! NOTE: same shape as muse::mpe::evaluateAt() - duplicated on purpose (uicomponents doesn't depend on mpe), keep them
+//! in sync: two quadratic Bezier arcs meeting at the bend point, sharing a tangent there, with control points clamped
+//! to the segment's value range
+static double bentValueAt(double from, double to, double bendT, double bendValue, double s)
+{
+    if (bendT <= 0.0 || bendT >= 1.0) {
+        return lerp(from, to, s);
+    }
+
+    const auto quadraticBezier = [](double u, double p0, double p1, double p2) {
+        const double v = 1.0 - u;
+        return v * v * p0 + 2.0 * v * u * p1 + u * u * p2;
+    };
+
+    const double range = to - from;
+    const double bend = from + std::clamp(bendValue, 0.0, 1.0) * range;
+    const double lo = std::min(from, to);
+    const double hi = std::max(from, to);
+    const double halfSlope = 0.5 * range;
+
+    if (s <= bendT) {
+        const double q1 = std::clamp(bend - bendT * halfSlope, lo, hi);
+        return quadraticBezier(s / bendT, from, q1, bend);
+    }
+
+    const double q2 = std::clamp(bend + (1.0 - bendT) * halfSlope, lo, hi);
+    return quadraticBezier((s - bendT) / (1.0 - bendT), bend, q2, to);
+}
+
+constexpr int BEND_SAMPLES_PER_SEGMENT = 32;
+constexpr qreal BEND_HANDLE_HALF_SIZE_PX = 4.0;
+constexpr qreal BEND_HANDLE_MIN_SEGMENT_WIDTH_PX = 24.0; // no handle squeezed between two close points
 }
 
 PolylinePlot::PolylinePlot(QQuickItem* parent)
@@ -178,6 +211,12 @@ PolylinePlot::PolylinePlot(QQuickItem* parent)
 void PolylinePlot::init()
 {
     dispatcher()->reg(this, "action://cancel", [this](){
+        // A bend being dragged isn't committed yet: back to what it was (the model never saw the preview)
+        if (m_pressedBendIndex >= 0 && m_pressedBendIndex < m_segmentBends.size()) {
+            m_segmentBends[m_pressedBendIndex].value = m_pressedBendOriginalValue;
+            rebuildVisiblePoints();
+        }
+
         // emit signal and let decide model what to do
         emit dragCancelled();
         // Qt suppresses hover events while a mouse button is held, so the
@@ -732,6 +771,22 @@ void PolylinePlot::updateBaselineFromDefaultValue()
 
 void PolylinePlot::updateActivePoint()
 {
+    // A bend being dragged: its handle is the active point (its value readout included)
+    if (m_pressedBendIndex >= 0) {
+        if (const std::optional<QPointF> handleN = bendHandleN(m_pressedBendIndex)) {
+            const QPointF newPx(toPxX(this, handleN->x()), toPxY(this, handleN->y()));
+            const qreal newValue = domainFromNormalized(*handleN).y();
+            const bool changed = !m_hasActivePoint || newPx != m_activePointPx || std::abs(newValue - m_activePointValue) > EPSILON;
+            m_hasActivePoint = true;
+            m_activePointPx = newPx;
+            m_activePointValue = newValue;
+            if (changed) {
+                emit activePointChanged();
+            }
+            return;
+        }
+    }
+
     const int hoveredDomainIdx = pointIndexAtPx(m_hoverPx);
     int draggedDisplayDomainIdx = INVALID_POINT_IDX;
     if (m_pressed && m_hasDraggedPointDomain && !m_points.isEmpty()) {
@@ -879,6 +934,8 @@ void PolylinePlot::rebuildVisiblePoints()
     }
 
     if (m_points.isEmpty()) {
+        m_linePointsN.clear();
+        m_lineColorIndices.clear();
         updateBaselineFromDefaultValue();
         update();
         return;
@@ -894,8 +951,9 @@ void PolylinePlot::rebuildVisiblePoints()
     for (int i = 0; i < m_points.size(); ++i) {
         sortedPointsWithIndexes.push_back({ m_points[i], i });
     }
-    std::sort(sortedPointsWithIndexes.begin(), sortedPointsWithIndexes.end(),
-              [](const P& a, const P& b) { return a.p.x() < b.p.x(); });
+    // stable: the in/out copies of a jump share their x, and bends/colors rely on their order
+    std::stable_sort(sortedPointsWithIndexes.begin(), sortedPointsWithIndexes.end(),
+                     [](const P& a, const P& b) { return a.p.x() < b.p.x(); });
 
     auto normY = [&](double yAbs) {
         double yn = yNormalizedFromDomain(yAbs);
@@ -905,18 +963,40 @@ void PolylinePlot::rebuildVisiblePoints()
         return yn;
     };
 
-    // interpolate at window edges
-    QVector<QPointF> sortedPointsN;
-    sortedPointsN.reserve(sortedPointsWithIndexes.size());
-    for (const auto& it : sortedPointsWithIndexes) {
-        sortedPointsN.push_back(QPointF(it.p.x(), normY(it.p.y())));
+    // The line actually drawn: every point (hidden ones included, they still shape it), bent segments sampled -
+    // normalized, each with the color index of the stretch it starts (colors are per segment arriving at a point)
+    m_linePointsN.clear();
+    m_lineColorIndices.clear();
+    const bool bendsValid = hasSegmentBends();
+    for (int r = 0; r < sortedPointsWithIndexes.size(); ++r) {
+        const P& curr = sortedPointsWithIndexes[r];
+        m_linePointsN.push_back(QPointF((curr.p.x() - m_xFrom) / xRange, normY(curr.p.y())));
+        m_lineColorIndices.push_back(r + 1);
+
+        if (!bendsValid || r + 1 >= sortedPointsWithIndexes.size()) {
+            continue;
+        }
+
+        const P& next = sortedPointsWithIndexes[r + 1];
+        if (next.idx != curr.idx + 1 || m_segmentBends[curr.idx].isStraight()) {
+            continue;
+        }
+
+        const SegmentBend& bend = m_segmentBends[curr.idx];
+        for (int j = 1; j < BEND_SAMPLES_PER_SEGMENT; ++j) {
+            const double s = static_cast<double>(j) / BEND_SAMPLES_PER_SEGMENT;
+            const double x = lerp(curr.p.x(), next.p.x(), s);
+            const double y = bentY(curr.p, next.p, bend, s);
+            m_linePointsN.push_back(QPointF((x - m_xFrom) / xRange, normY(y)));
+            m_lineColorIndices.push_back(r + 1);
+        }
     }
 
     // Synthetic boundary points must be interpolated in rendered Y-space.
     // Interpolating in domain Y breaks continuity for split mappings
     // (e.g. segments crossing 0 dB split value).
-    const double yAt0N = valueAtX(sortedPointsN, m_xFrom);
-    const double yAt1N = valueAtX(sortedPointsN, m_xTo);
+    const double yAt0N = valueAtX(m_linePointsN, 0.0);
+    const double yAt1N = valueAtX(m_linePointsN, 1.0);
 
     // NOTE: synthetic boundary points are added just outside the visible range
     // so the polyline draws correctly: they allow horizontal segments
@@ -931,6 +1011,9 @@ void PolylinePlot::rebuildVisiblePoints()
     // interior real points
     for (const auto& it : sortedPointsWithIndexes) {
         const auto& p = it.p;
+        if (isHiddenPoint(it.idx)) {
+            continue;
+        }
         // NOTE: build visible points with a margin so points directly at the edges
         // of container do not flash on re-paint
         if (p.x() < (m_xFrom - BOUNDARY_MARGIN) || p.x() > (m_xTo + BOUNDARY_MARGIN)) {
@@ -949,7 +1032,7 @@ void PolylinePlot::rebuildVisiblePoints()
     update();
 }
 
-QVector<QPointF> PolylinePlot::polylinePx() const
+QVector<QPointF> PolylinePlot::linePx(QVector<int>* colorIndices) const
 {
     QVector<QPointF> pts;
 
@@ -969,39 +1052,50 @@ QVector<QPointF> PolylinePlot::polylinePx() const
         pts.push_back(QPointF(0.0, y));
         pts.push_back(QPointF(width(), y));
 
+        if (colorIndices) {
+            colorIndices->push_back(0);
+        }
+
         return pts;
     }
 
-    // 2+ points -> polyline
-    QVector<QPointF> sorted = m_pointsNVisible;
-    std::sort(sorted.begin(), sorted.end(),
-              [](const QPointF& a, const QPointF& b) { return a.x() < b.x(); });
+    // The line through every point, bends included (see rebuildVisiblePoints()), cropped to the item, running
+    // flat past the first/last point
+    if (!m_linePointsN.isEmpty()) {
+        const qreal yAt0 = valueAtX(m_linePointsN, 0.0);
+        const qreal yAt1 = valueAtX(m_linePointsN, 1.0);
 
-    const QPointF firstN = sorted.front();
-    const QPointF lastN  = sorted.back();
-
-    const qreal firstYpx = toPxY(this, firstN.y());
-    const qreal lastYpx  = toPxY(this, lastN.y());
-
-    pts.reserve(sorted.size() + 2);
-
-    // left horizontal segment start
-    pts.push_back(QPointF(0.0, firstYpx));
-
-    // actual points
-    for (const auto& pN : sorted) {
-        if (pN.x() < 0.0 || pN.x() > 1.0) {
-            // ignore synthetic boundary points
-            continue;
+        int leftColorIndex = 0;
+        for (int i = 0; i < m_linePointsN.size() && m_linePointsN[i].x() <= 0.0; ++i) {
+            leftColorIndex = m_lineColorIndices[i];
         }
-        pts.push_back(QPointF(toPxX(this, clamp01(pN.x())),
-                              toPxY(this, pN.y())));
+
+        pts.push_back(QPointF(0.0, toPxY(this, yAt0)));
+        if (colorIndices) {
+            colorIndices->push_back(leftColorIndex);
+        }
+
+        for (int i = 0; i < m_linePointsN.size(); ++i) {
+            const QPointF& pN = m_linePointsN[i];
+            if (pN.x() <= 0.0 || pN.x() >= 1.0) {
+                continue;
+            }
+            pts.push_back(QPointF(toPxX(this, pN.x()), toPxY(this, pN.y())));
+            if (colorIndices) {
+                colorIndices->push_back(m_lineColorIndices[i]);
+            }
+        }
+
+        pts.push_back(QPointF(width(), toPxY(this, yAt1)));
+        return pts;
     }
 
-    // right horizontal segment end
-    pts.push_back(QPointF(width(), lastYpx));
-
     return pts;
+}
+
+QVector<QPointF> PolylinePlot::polylinePx() const
+{
+    return linePx(nullptr);
 }
 
 bool PolylinePlot::isNearLinePx(const QPointF& px) const
@@ -1021,6 +1115,127 @@ bool PolylinePlot::isNearLinePx(const QPointF& px) const
 void PolylinePlot::setLockedPoints(const QVector<bool>& locked)
 {
     m_lockedPoints = locked;
+}
+
+void PolylinePlot::setHiddenPoints(const QVector<bool>& hidden)
+{
+    if (m_hiddenPoints == hidden) {
+        return;
+    }
+
+    m_hiddenPoints = hidden;
+    rebuildVisiblePoints();
+}
+
+bool PolylinePlot::isHiddenPoint(int index) const
+{
+    return m_hiddenPoints.size() == m_points.size() && index >= 0 && index < m_hiddenPoints.size() && m_hiddenPoints[index];
+}
+
+void PolylinePlot::setSegmentBends(const QVector<SegmentBend>& bends)
+{
+    if (m_segmentBends == bends) {
+        return;
+    }
+
+    m_segmentBends = bends;
+    rebuildVisiblePoints();
+}
+
+void PolylinePlot::setValueMapping(ValueMapping yToValue, ValueMapping valueToY)
+{
+    m_yToValue = std::move(yToValue);
+    m_valueToY = std::move(valueToY);
+    rebuildVisiblePoints();
+}
+
+qreal PolylinePlot::toValue(qreal y) const
+{
+    return m_yToValue ? m_yToValue(y) : y;
+}
+
+qreal PolylinePlot::fromValue(qreal value) const
+{
+    return m_valueToY ? m_valueToY(value) : value;
+}
+
+//! NOTE: the segment's y at s ([0; 1] across it), its bend applied on the values
+qreal PolylinePlot::bentY(const QPointF& from, const QPointF& to, const SegmentBend& bend, qreal s) const
+{
+    return fromValue(bentValueAt(toValue(from.y()), toValue(to.y()), bend.t, bend.value, s));
+}
+
+bool PolylinePlot::hasSegmentBends() const
+{
+    return !m_points.isEmpty() && m_segmentBends.size() == m_points.size() - 1;
+}
+
+//! NOTE: the handle sits on the bend point itself, which the line passes through
+std::optional<QPointF> PolylinePlot::bendHandleN(int segmentIndex) const
+{
+    if (!hasSegmentBends() || segmentIndex < 0 || segmentIndex >= m_segmentBends.size() || width() <= 0) {
+        return std::nullopt;
+    }
+
+    const SegmentBend& bend = m_segmentBends[segmentIndex];
+    const QPointF& from = m_points[segmentIndex];
+    const QPointF& to = m_points[segmentIndex + 1];
+    const qreal fromV = toValue(from.y());
+    const qreal toV = toValue(to.y());
+    if (!bend.editable || std::abs(toV - fromV) <= EPSILON) {
+        return std::nullopt; // a flat segment can't bend: its bend is a fraction of its value range
+    }
+
+    // x unclamped (normalizedFromDomain() clamps it): the segment may cross the item's edges
+    const qreal xRange = m_xTo - m_xFrom;
+    if (!hasValidXRange() || (to.x() - from.x()) / xRange * width() < BEND_HANDLE_MIN_SEGMENT_WIDTH_PX) {
+        return std::nullopt;
+    }
+
+    const qreal handleXN = (lerp(from.x(), to.x(), bend.t) - m_xFrom) / xRange;
+    if (handleXN < 0.0 || handleXN > 1.0) {
+        return std::nullopt;
+    }
+
+    const qreal handleY = fromValue(lerp(fromV, toV, bend.value));
+    return QPointF(handleXN, normalizedFromDomain(QPointF(from.x(), handleY)).y());
+}
+
+//! NOTE: the segment (between points i and i + 1) spanning px's x
+int PolylinePlot::segmentIndexAtPx(const QPointF& px) const
+{
+    if (m_points.size() < 2 || width() <= 0 || !hasValidXRange()) {
+        return INVALID_POINT_IDX;
+    }
+
+    const qreal x = m_xFrom + (px.x() / width()) * (m_xTo - m_xFrom);
+    for (int i = 0; i + 1 < m_points.size(); ++i) {
+        if (x >= m_points[i].x() && x <= m_points[i + 1].x()) {
+            return i;
+        }
+    }
+
+    return INVALID_POINT_IDX;
+}
+
+int PolylinePlot::bendHandleIndexAtPx(const QPointF& px) const
+{
+    int bestIdx = INVALID_POINT_IDX;
+    qreal bestDistance = m_hitRadius;
+    for (int i = 0; i < m_segmentBends.size(); ++i) {
+        const std::optional<QPointF> handleN = bendHandleN(i);
+        if (!handleN) {
+            continue;
+        }
+
+        const qreal distance = std::hypot(px.x() - toPxX(this, handleN->x()), px.y() - toPxY(this, handleN->y()));
+        if (distance <= bestDistance) {
+            bestDistance = distance;
+            bestIdx = i;
+        }
+    }
+
+    return bestIdx;
 }
 
 int PolylinePlot::pointIndexAtPx(const QPointF& px) const
@@ -1109,14 +1324,15 @@ QPointF PolylinePlot::snapToNeighbor(qreal dragPxX, QPointF pDomain) const
     // Can't have multiple automation points at the exact same timepoint.
     static constexpr double SNAP_EPSILON = 1e-9;
 
-    if (currentIdx + 1 < m_points.size()) {
+    // Hidden neighbors (e.g. outside of the item) aren't snap targets: nothing to see there
+    if (currentIdx + 1 < m_points.size() && !isHiddenPoint(currentIdx + 1)) {
         const qreal neighborPxX = toPxX(this, normalizedFromDomain(m_points[currentIdx + 1]).x());
         if (std::abs(dragPxX - neighborPxX) <= m_snapThresholdPx) {
             pDomain.setX(m_points[currentIdx + 1].x() - SNAP_EPSILON);
         }
     }
 
-    if (currentIdx > 0) {
+    if (currentIdx > 0 && !isHiddenPoint(currentIdx - 1)) {
         const qreal neighborPxX = toPxX(this, normalizedFromDomain(m_points[currentIdx - 1]).x());
         if (std::abs(dragPxX - neighborPxX) <= m_snapThresholdPx) {
             pDomain.setX(m_points[currentIdx - 1].x() + SNAP_EPSILON);
@@ -1147,6 +1363,7 @@ void PolylinePlot::resetGestureState()
     m_hoveredOnLine = false;
     m_draggedPointDomain = {};
     m_movedSincePress = false;
+    m_pressedBendIndex = INVALID_POINT_IDX;
     m_pressPx = QPointF(0.0, 0.0);
 
     updateCursor();
@@ -1164,7 +1381,8 @@ void PolylinePlot::geometryChange(const QRectF& newG, const QRectF& oldG)
 
 void PolylinePlot::drawLinesAndFillUnder(QPainter* painter) const
 {
-    const auto pts = polylinePx();
+    QVector<int> colorIndices;
+    const auto pts = linePx(&colorIndices);
     if (pts.size() < 2) {
         return;
     }
@@ -1178,7 +1396,8 @@ void PolylinePlot::drawLinesAndFillUnder(QPainter* painter) const
     const qreal baselinePxY = toPxY(this, m_baselineN);
 
     for (int i = 0; i < pts.size() - 1; ++i) {
-        if (i < m_colorsUnderLine.size()) {
+        const int colorIndex = i < colorIndices.size() ? colorIndices[i] : i;
+        if (colorIndex < m_colorsUnderLine.size()) {
             // fill area under line
             const QVector<QPointF> areaUnderLine {
                 QPointF(pts[i].x(), baselinePxY), // bottom left
@@ -1188,7 +1407,7 @@ void PolylinePlot::drawLinesAndFillUnder(QPainter* painter) const
             };
             QPainterPath path;
             path.addPolygon(QPolygonF(areaUnderLine));
-            painter->fillPath(path, m_colorsUnderLine.at(i));
+            painter->fillPath(path, m_colorsUnderLine.at(colorIndex));
         }
         // draw line
         painter->drawLine(pts[i], pts[i + 1]);
@@ -1260,6 +1479,7 @@ void PolylinePlot::paint(QPainter* painter)
 
     // draw lines and fill area underneath
     drawLinesAndFillUnder(painter);
+    paintBendHandles(painter);
 
     // draw points
     IF_ASSERT_FAILED(m_standardPointStyle && m_ghostPointStyle && m_selectedPointStyle) {
@@ -1297,6 +1517,40 @@ void PolylinePlot::paint(QPainter* painter)
     // Only the point actually being dragged gets a live value readout.
     if (m_pressed && m_hasActivePoint && !m_activePointLabel.isEmpty()) {
         paintValueLabel(painter);
+    }
+}
+
+//! NOTE: a small diamond, so it can't be mistaken for a point. Only shown while its segment (or itself) is hovered,
+//! while dragged, or once the segment is actually bent - so straight lines aren't cluttered with handles
+void PolylinePlot::paintBendHandles(QPainter* painter) const
+{
+    for (int i = 0; i < m_segmentBends.size(); ++i) {
+        const std::optional<QPointF> handleN = bendHandleN(i);
+        if (!handleN) {
+            continue;
+        }
+
+        const bool isActive = i == m_pressedBendIndex || (m_pressedBendIndex < 0 && i == m_hoveredBendIndex);
+        const bool isSegmentHovered = m_pressedBendIndex < 0 && m_pressedPointIndex < 0 && i == m_hoveredSegmentIndex;
+        if (!isActive && !isSegmentHovered && m_segmentBends[i].isStraight()) {
+            continue;
+        }
+
+        const QPointF centre(toPxX(this, handleN->x()), toPxY(this, handleN->y()));
+        const qreal half = isActive ? BEND_HANDLE_HALF_SIZE_PX + 1.0 : BEND_HANDLE_HALF_SIZE_PX;
+
+        const QPolygonF diamond {
+            QPointF(centre.x(), centre.y() - half),
+            QPointF(centre.x() + half, centre.y()),
+            QPointF(centre.x(), centre.y() + half),
+            QPointF(centre.x() - half, centre.y()),
+        };
+
+        QPen pen(m_lineColor);
+        pen.setWidthF(m_lineWidth);
+        painter->setPen(pen);
+        painter->setBrush(isActive ? m_lineColor : m_standardPointStyle->centerColor());
+        painter->drawPolygon(diamond);
     }
 }
 
@@ -1349,6 +1603,8 @@ void PolylinePlot::hoverMoveEvent(QHoverEvent* e)
     m_hoverPx = e->position();
 
     const bool nearPoint = (pointIndexAtPx(m_hoverPx) >= 0);
+    m_hoveredBendIndex = nearPoint ? INVALID_POINT_IDX : bendHandleIndexAtPx(m_hoverPx);
+    const bool nearBendHandle = m_hoveredBendIndex >= 0;
 
     bool nearLine = false;
     if (m_ghostPointsEnabled) {
@@ -1366,7 +1622,8 @@ void PolylinePlot::hoverMoveEvent(QHoverEvent* e)
         nearLine = isNearLinePx(m_hoverPx);
     }
 
-    m_hoveredOnLine = (nearPoint || nearLine);
+    m_hoveredOnLine = (nearPoint || nearLine || nearBendHandle);
+    m_hoveredSegmentIndex = (nearLine && !nearPoint) ? segmentIndexAtPx(m_hoverPx) : INVALID_POINT_IDX;
     updateCursor();
 
     updateActivePoint();
@@ -1375,7 +1632,7 @@ void PolylinePlot::hoverMoveEvent(QHoverEvent* e)
     // IMPORTANT: only consume hover when automation is actually interactive.
     // Otherwise let underlying ClipItem hover area keep containsMouse=true,
     // so itemHovered stays correct for selection/double-click logic.
-    if (nearPoint || nearLine || m_pressed || m_pressedPointIndex >= 0) {
+    if (nearPoint || nearLine || nearBendHandle || m_pressed || m_pressedPointIndex >= 0) {
         e->accept();
     } else {
         e->ignore();
@@ -1386,6 +1643,8 @@ void PolylinePlot::hoverLeaveEvent(QHoverEvent* e)
 {
     Q_UNUSED(e);
     m_hoveredOnLine = false;
+    m_hoveredBendIndex = INVALID_POINT_IDX;
+    m_hoveredSegmentIndex = INVALID_POINT_IDX;
     updateCursor();
     updateActivePoint();
     update();
@@ -1404,10 +1663,12 @@ void PolylinePlot::mousePressEvent(QMouseEvent* e)
 
     const int pointIndex = pointIndexAtPx(e->position());
     const bool onPoint = pointIndex >= 0;
+    const int bendIndex = onPoint ? INVALID_POINT_IDX : bendHandleIndexAtPx(e->position());
+    const bool onBendHandle = bendIndex >= 0;
     const bool onLine  = isNearLinePx(e->position());
 
-    // NOTE: allow clicks on the points and lines only
-    if (!onPoint && !onLine) {
+    // NOTE: allow clicks on the points, bend handles and lines only
+    if (!onPoint && !onBendHandle && !onLine) {
         e->ignore();
         return;
     }
@@ -1419,6 +1680,14 @@ void PolylinePlot::mousePressEvent(QMouseEvent* e)
 
     m_pressed = true;
     m_pressPx = e->position();
+
+    if (onBendHandle) {
+        m_pressedBendIndex = bendIndex;
+        m_pressedBendOriginalValue = m_segmentBends[bendIndex].value;
+        updateActivePoint();
+        update();
+        return;
+    }
 
     if (onPoint) {
         m_pressedOnPoint = true;
@@ -1468,6 +1737,33 @@ void PolylinePlot::mouseMoveEvent(QMouseEvent* e)
         m_movedSincePress = true;
     }
 
+    // bend a segment: its handle only moves vertically, between the two points' values
+    if (m_pressedBendIndex >= 0) {
+        // Not a drag yet (a click may still be meant, see mouseReleaseEvent) - and the points may have changed under
+        // the drag (e.g. undone by shortcut): only bend what's still there
+        if (!m_movedSincePress || width() <= 0 || height() <= 0 || !hasSegmentBends()
+            || m_pressedBendIndex >= m_segmentBends.size()) {
+            return;
+        }
+
+        const QPointF pN = clamp01(QPointF(pos.x() / width(), 1.0 - (pos.y() / height())));
+        const qreal yDomain = domainFromNormalized(pN).y();
+        const QPointF& from = m_points[m_pressedBendIndex];
+        const QPointF& to = m_points[m_pressedBendIndex + 1];
+        const qreal fromV = toValue(from.y());
+        const qreal rangeV = toValue(to.y()) - fromV;
+        if (std::abs(rangeV) <= EPSILON) {
+            return; // flat now: nothing to bend
+        }
+        const qreal value = std::clamp((toValue(yDomain) - fromV) / rangeV, 0.0, 1.0);
+
+        m_segmentBends[m_pressedBendIndex].value = value;
+        rebuildVisiblePoints();
+        emit segmentBendMoved(m_pressedBendIndex, value, /*completed*/ false);
+        updateActivePoint();
+        return;
+    }
+
     // drag point (2+ points only)
     if (m_pressedPointIndex >= 0) {
         if (width() <= 0 || height() <= 0) {
@@ -1498,6 +1794,26 @@ void PolylinePlot::mouseReleaseEvent(QMouseEvent* e)
 
     const bool isClick = !m_movedSincePress;
     const QPointF rel = e->position();
+
+    // commit a bend
+    if (m_pressedBendIndex >= 0) {
+        // as it was on press (a drag has already changed it)
+        const bool wasHandleShown = m_pressedBendIndex < m_segmentBends.size()
+                                    && !SegmentBend { m_segmentBends[m_pressedBendIndex].t, m_pressedBendOriginalValue }.isStraight();
+        if (!isClick && m_pressedBendIndex < m_segmentBends.size()) {
+            emit segmentBendMoved(m_pressedBendIndex, m_segmentBends[m_pressedBendIndex].value, /*completed*/ true);
+        } else if (isClick && !wasHandleShown && width() > 0 && height() > 0) {
+            // A plain click on a straight segment's (not drawn) handle is a click on the line: add a point there
+            const GhostPoint ghostPoint = ghostPointToPolylinePx(m_pressPx);
+            const QPointF pN(clamp01(ghostPoint.point.x() / width()), 1.0 - clamp01(ghostPoint.point.y() / height()));
+            const QPointF pDomain = domainFromNormalized(pN);
+            emit pointAdded(pDomain.x(), pDomain.y(), /*completed*/ false);
+            emit pointAdded(pDomain.x(), pDomain.y(), /*completed*/ true);
+        }
+        emit interactionFinished();
+        resetGestureState();
+        return;
+    }
 
     // commit point drag
     if (!isClick && m_pressedPointIndex >= 0) {
@@ -1533,7 +1849,19 @@ void PolylinePlot::mouseDoubleClickEvent(QMouseEvent* e)
 
     const int idx = pointIndexAtPx(e->position());
     if (idx < 0) {
-        e->ignore();
+        // a bend handle: straight again
+        const int bendIndex = bendHandleIndexAtPx(e->position());
+        if (bendIndex < 0) {
+            e->ignore();
+            return;
+        }
+
+        e->accept();
+        m_segmentBends[bendIndex] = SegmentBend { 0.5, 0.5, m_segmentBends[bendIndex].editable };
+        rebuildVisiblePoints();
+        emit segmentBendMoved(bendIndex, 0.5, /*completed*/ true);
+        emit interactionFinished();
+        resetGestureState();
         return;
     }
 
