@@ -1127,6 +1127,16 @@ void PolylinePlot::setHiddenPoints(const QVector<bool>& hidden)
     rebuildVisiblePoints();
 }
 
+void PolylinePlot::setGroupSelectedPoints(const QVector<bool>& selected)
+{
+    if (m_groupSelectedPoints == selected) {
+        return;
+    }
+
+    m_groupSelectedPoints = selected;
+    update();
+}
+
 bool PolylinePlot::isHiddenPoint(int index) const
 {
     return m_hiddenPoints.size() == m_points.size() && index >= 0 && index < m_hiddenPoints.size() && m_hiddenPoints[index];
@@ -1493,7 +1503,9 @@ void PolylinePlot::paint(QPainter* painter)
         const QPointF centre(toPxX(this, pN.x()), toPxY(this, pN.y()));
 
         const int domainIdx = (i < m_visibleToDomainIndex.size()) ? m_visibleToDomainIndex[i] : INVALID_POINT_IDX;
-        const bool isSelected = m_selectedPointsEnabled && domainIdx >= 0 && muse::contains(m_selectedPointsIndices, domainIdx);
+        const bool isGroupSelected = m_groupSelectedPoints.size() == m_points.size() && domainIdx >= 0 && m_groupSelectedPoints[domainIdx];
+        const bool isSelected = m_selectedPointsEnabled && domainIdx >= 0
+                                && (isGroupSelected || muse::contains(m_selectedPointsIndices, domainIdx));
         const bool isHovered = !(m_pressed && isSelected) && domainIdx >= 0 && domainIdx == hoveredIndex;
 
         const PolylinePointStyle* style = isSelected ? m_selectedPointStyle : m_standardPointStyle;
@@ -1777,7 +1789,14 @@ void PolylinePlot::mouseMoveEvent(QMouseEvent* e)
 
         m_draggedPointDomain = pDomain;
         m_hasDraggedPointDomain = true;
+        const int pointsCount = m_points.size();
         emit pointMoved(m_pressedPointIndex, pDomain.x(), pDomain.y(), /*completed*/ false);
+
+        // The model may have moved the point elsewhere than the mouse (e.g. only vertically): follow where it actually
+        // is, or the active point (value readout, selection) would be looked up at the mouse and land on a neighbor
+        if (m_points.size() == pointsCount && m_pressedPointIndex < m_points.size()) {
+            m_draggedPointDomain = m_points[m_pressedPointIndex];
+        }
         updateActivePoint();
 
         return;

@@ -196,6 +196,11 @@ public:
     //! shapes the line (e.g. a neighbor outside of the visible range)
     void setHiddenPoints(const QVector<bool>& hidden);
 
+    //! NOTE: one flag per point (same order as points()): points selected by the model (e.g. through another selection),
+    //! drawn with the selected style besides the one being dragged. Ignored while its size doesn't match the points,
+    //! so it must be set again after a setPoints() that changes their count
+    void setGroupSelectedPoints(const QVector<bool>& selected);
+
     //! NOTE: one per segment (points().size() - 1, same order), ignored otherwise - so it must be set again after
     //! every setPoints(). Points are expected sorted by x
     void setSegmentBends(const QVector<SegmentBend>& bends);
@@ -318,6 +323,7 @@ private:
     QVector<QPointF> m_points;          // domain points as provided from model
     QVector<bool> m_lockedPoints;
     QVector<bool> m_hiddenPoints;
+    QVector<bool> m_groupSelectedPoints;
     QVector<SegmentBend> m_segmentBends;
     ValueMapping m_yToValue;
     ValueMapping m_valueToY;
