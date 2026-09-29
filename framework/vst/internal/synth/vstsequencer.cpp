@@ -69,12 +69,13 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
     }
 
     m_mainStreamEvents.clear();
+    m_controllerStates.clear();
 
     if (m_onMainStreamFlushed) {
         m_onMainStreamFlushed();
     }
 
-    addPlaybackEvents(m_mainStreamEvents, events);
+    addPlaybackEvents(m_mainStreamEvents, events, true /*recordState*/);
     sortNoteOnEventsByPitch(m_mainStreamEvents);
     addMidiMessagesEvents(m_mainStreamEvents, events, true /*recordState*/);
 
@@ -87,7 +88,7 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
 
 void VstSequencer::updateOffStreamEvents(const mpe::PlaybackEventsMap& events)
 {
-    addPlaybackEvents(m_offStreamEvents, events);
+    addPlaybackEvents(m_offStreamEvents, events, false /*recordState*/);
     addMidiMessagesEvents(m_offStreamEvents, events, false /*recordState*/);
     updateOffSequenceIterator();
 }
@@ -117,7 +118,7 @@ muse::audio::gain_t VstSequencer::currentGain() const
     return expressionLevel(maxDynamicLevel);
 }
 
-void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events)
+void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState)
 {
     SostenutoTimeAndDurations sostenutoTimeAndDurations;
 
@@ -128,7 +129,7 @@ void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::P
             if (std::holds_alternative<mpe::NoteEvent>(event)) {
                 addNoteEvent(destination, std::get<mpe::NoteEvent>(event), notesOffset, sostenutoTimeAndDurations);
             } else if (std::holds_alternative<mpe::ControllerChangeEvent>(event)) {
-                addControlChangeEvent(destination, evPair.first, std::get<mpe::ControllerChangeEvent>(event));
+                addControlChangeEvent(destination, evPair.first, std::get<mpe::ControllerChangeEvent>(event), recordState);
             }
         }
     }
@@ -237,7 +238,7 @@ void VstSequencer::addPedalEvent(EventSequenceMap& destination, const mpe::Artic
 }
 
 void VstSequencer::addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp,
-                                         const mpe::ControllerChangeEvent& event)
+                                         const mpe::ControllerChangeEvent& event, bool recordState)
 {
     switch (event.type) {
     case mpe::ControllerChangeEvent::Modulation:
@@ -249,6 +250,13 @@ void VstSequencer::addControlChangeEvent(EventSequenceMap& destination, const mp
     case mpe::ControllerChangeEvent::PitchBend:
         addParamChange(destination, timestamp, PITCH_BEND_IDX, event.val);
         break;
+    case mpe::ControllerChangeEvent::ControlChange: {
+        const ControlIdx controlIdx = static_cast<ControlIdx>(event.controller);
+        addParamChange(destination, timestamp, controlIdx, event.val);
+        if (recordState) {
+            m_controllerStates[controlIdx].insert_or_assign(timestamp, static_cast<PluginParamValue>(event.val.raw()));
+        }
+    } break;
     case mpe::ControllerChangeEvent::Undefined:
         break;
     }
@@ -336,13 +344,24 @@ void VstSequencer::addPitchCurve(EventSequenceMap& destination, const mpe::NoteE
 void VstSequencer::midiStateBefore(const audio::msecs_t position, EventSequence& onEvents, EventSequence& offEvents) const
 {
     auto it = m_midiStates.lower_bound(position);
-    if (it == m_midiStates.cbegin()) {
-        return;
+    if (it != m_midiStates.cbegin()) {
+        const MidiState& state = std::prev(it)->second;
+        onEvents.insert(onEvents.end(), state.onEvents.cbegin(), state.onEvents.cend());
+        offEvents.insert(offEvents.end(), state.offEvents.cbegin(), state.offEvents.cend());
     }
 
-    const MidiState& state = std::prev(it)->second;
-    onEvents.insert(onEvents.end(), state.onEvents.cbegin(), state.onEvents.cend());
-    offEvents.insert(offEvents.end(), state.offEvents.cbegin(), state.offEvents.cend());
+    // MIDI CC automation: the value each automated controller should have at the start position
+    for (const auto& [controlIdx, values] : m_controllerStates) {
+        auto valueIt = values.lower_bound(position);
+        if (valueIt == values.cbegin()) {
+            continue;
+        }
+
+        auto mappingIt = m_mapping.find(controlIdx);
+        if (mappingIt != m_mapping.cend()) {
+            onEvents.emplace_back(ParamChangeEvent { mappingIt->second, std::prev(valueIt)->second });
+        }
+    }
 }
 
 mpe::timestamp_t VstSequencer::midiMessagesNotesOffset(const mpe::PlaybackEventList& events)

@@ -278,6 +278,7 @@ void FluidSequencer::addControlChangeEvent(EventSequenceMap& destination, const 
             addPitchBend(destination, timestamp, channelIdx,
                          static_cast<uint32_t>(event.val * 16383.f));
             break;
+        case mpe::ControllerChangeEvent::ControlChange: // MIDI CC automation only targets VST instruments
         case mpe::ControllerChangeEvent::Undefined:
             break;
         }

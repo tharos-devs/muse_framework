@@ -267,6 +267,7 @@ struct ControllerChangeEvent {
         Modulation,
         SustainPedalOnOff,
         PitchBend,
+        ControlChange, // any MIDI CC, see controller
     };
 
     using Value = muse::number_t<float>;
@@ -274,10 +275,11 @@ struct ControllerChangeEvent {
     Type type = Undefined;
     Value val; // [0;1]
     layer_idx_t layerIdx = 0;
+    uint8_t controller = 0; // MIDI CC number, only used by ControlChange
 
     bool operator==(const ControllerChangeEvent& e) const
     {
-        return type == e.type && val == e.val && layerIdx == e.layerIdx;
+        return type == e.type && val == e.val && layerIdx == e.layerIdx && controller == e.controller;
     }
 };
 

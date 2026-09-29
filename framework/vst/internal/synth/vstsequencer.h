@@ -45,12 +45,13 @@ private:
 
     using SostenutoTimeAndDurations = std::vector<mpe::TimestampAndDuration>;
 
-    void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events);
+    void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicAutomationLayers& layers);
     void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::timestamp_t notesOffset,
                       SostenutoTimeAndDurations& sostenutoTimeAndDurations);
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
-    void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event);
+    void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event,
+                               bool recordState);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                         const PluginParamValue value);
     void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta);
@@ -79,5 +80,8 @@ private:
     };
 
     std::map<audio::msecs_t, MidiState> m_midiStates;
+
+    //! NOTE: MIDI CC automation values sent over time, per controller (main stream only)
+    std::map<ControlIdx, std::map<audio::msecs_t, PluginParamValue> > m_controllerStates;
 };
 }

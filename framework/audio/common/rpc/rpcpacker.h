@@ -586,13 +586,13 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::SyllableEvent& 
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::mpe::ControllerChangeEvent& value)
 {
-    p.process(static_cast<int8_t>(value.type), value.val, value.layerIdx);
+    p.process(static_cast<int8_t>(value.type), value.val, value.layerIdx, value.controller);
 }
 
 inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::ControllerChangeEvent& value)
 {
     int8_t type = 0;
-    p.process(type, value.val, value.layerIdx);
+    p.process(type, value.val, value.layerIdx, value.controller);
     value.type = static_cast<muse::mpe::ControllerChangeEvent::Type>(type);
 }
 
