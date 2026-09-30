@@ -101,6 +101,10 @@ public:
     void (*avcodec_flush_buffers)(AVCodecContext* avctx) = nullptr;
     const char*(*avcodec_get_name)(enum AVCodecID id) = nullptr;
     const AVCodec*(*avcodec_find_encoder_by_name)(const char* name) = nullptr;
+    // Stream side data (replaced by the codec parameters' coded side data from FFmpeg 7): the real prototypes,
+    // their size types changed between versions
+    decltype(&::av_stream_get_side_data) av_stream_get_side_data = nullptr;
+    decltype(&::av_stream_new_side_data) av_stream_new_side_data = nullptr;
     AVFrame*(*av_frame_alloc)(void) = nullptr;
     void (*av_frame_free)(AVFrame** frame) = nullptr;
     AVPacket*(*av_packet_alloc)(void) = nullptr;

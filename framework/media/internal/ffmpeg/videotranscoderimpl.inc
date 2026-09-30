@@ -23,6 +23,16 @@
 //! NOTE Included inside each muse::media::ffmpeg::vN namespace (see vN/videotranscoder.cpp),
 //! after that version's FFmpeg headers, FFmpegLibHandler and VideoDecoder
 
+//! NOTE The parameter types of a function pointer (to follow the FFmpeg prototypes whatever their version)
+template<typename>
+struct FunctionArgsOf;
+template<typename R, typename... Args>
+struct FunctionArgsOf<R (*)(Args...)> {
+    using type = std::tuple<Args...>;
+};
+template<typename F>
+using FunctionArgs = typename FunctionArgsOf<F>::type;
+
 bool VideoTranscoder::load(const FFmpegLibPaths& paths)
 {
     auto handler = std::make_shared<FFmpegLibHandler>();
@@ -213,6 +223,16 @@ Ret VideoTranscoder::transcodeWithLeadIn(const io::path_t& videoSource, const io
                                                                 &stream->codecpar->nb_coded_side_data,
                                                                 AV_PKT_DATA_DISPLAYMATRIX, matrix->size, 0)) {
             std::memcpy(copy->data, matrix->data, matrix->size);
+        }
+    }
+#else
+    //! NOTE Same with the stream side data API of FFmpeg < 7 (size type: int in 4.x, size_t after)
+    {
+        std::remove_pointer_t<std::tuple_element_t<2, FunctionArgs<decltype(ff.av_stream_get_side_data)> > > size = 0;
+        if (const uint8_t* matrix = ff.av_stream_get_side_data(sourceStream, AV_PKT_DATA_DISPLAYMATRIX, &size)) {
+            if (uint8_t* copy = ff.av_stream_new_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX, size)) {
+                std::memcpy(copy, matrix, static_cast<size_t>(size));
+            }
         }
     }
 #endif

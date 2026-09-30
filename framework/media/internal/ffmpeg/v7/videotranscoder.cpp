@@ -27,6 +27,8 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <type_traits>
+#include <tuple>
 
 #include "ffmpeglibhandler.h"
 #include "videodecoder.h"

@@ -110,6 +110,8 @@ bool FFmpegLibHandler::loadApi()
     RESOLVE_FROM(m_avCodecLibrary, avcodec_flush_buffers);
     RESOLVE_FROM(m_avCodecLibrary, avcodec_get_name);
     RESOLVE_FROM(m_avCodecLibrary, avcodec_find_encoder_by_name);
+    RESOLVE_FROM(m_avFormatLibrary, av_stream_get_side_data);
+    RESOLVE_FROM(m_avFormatLibrary, av_stream_new_side_data);
 
     // libswscale
     RESOLVE_FROM(m_swsScaleLibrary, sws_getCachedContext);
@@ -194,6 +196,7 @@ bool FFmpegLibHandler::functionsValid() const
            && av_seek_frame && av_find_best_stream
            && avcodec_flush_buffers && avcodec_get_name
            && av_dict_set && av_dict_free && avcodec_find_encoder_by_name
+           && av_stream_get_side_data && av_stream_new_side_data
            && sws_getCachedContext && sws_scale && sws_freeContext;
 }
 
@@ -212,6 +215,8 @@ void FFmpegLibHandler::clearFunctions()
     av_dict_set = nullptr;
     av_dict_free = nullptr;
     avcodec_find_encoder_by_name = nullptr;
+    av_stream_get_side_data = nullptr;
+    av_stream_new_side_data = nullptr;
     avformat_new_stream = nullptr;
     avformat_write_header = nullptr;
     av_write_trailer = nullptr;
