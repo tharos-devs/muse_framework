@@ -22,20 +22,12 @@
 
 #pragma once
 
-#include "modularity/ioc.h"
+#include <memory>
 
-#include "../ivideodecoderfactory.h"
-#include "../imediaconfiguration.h"
+#include "internal/ffmpegutils.h"
 
-namespace muse::media {
-class VideoDecoderFactory : public IVideoDecoderFactory
-{
-    GlobalInject<IMediaConfiguration> configuration;
+#include "media/ivideoremuxer.h"
 
-public:
-    io::paths_t defaultFFmpegLibsDirs() const override;
-
-    IVideoDecoderPtr createDecoder(const io::paths_t& ffmpegLibsDirs) const override;
-    IVideoRemuxerPtr createRemuxer(const io::paths_t& ffmpegLibsDirs) const override;
-};
+namespace muse::media::ffmpeg::v8 {
+#include "../videoremuxerdecl.inc"
 }

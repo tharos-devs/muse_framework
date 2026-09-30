@@ -209,6 +209,22 @@ void SoundTrackAudioNode::setPlayheadPosition(const PlayheadPositionPtr& playhea
     m_playheadPosition = playheadPosition;
 }
 
+void SoundTrackAudioNode::setOfflineStart(const secs_t startTime)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    // TimePosition can't be negative: the cursor is set directly
+    const sample_rate_t rate = m_outputSpec.sampleRate;
+    m_timelineSamples = rate > 0 ? static_cast<int64_t>(std::llround(startTime.raw() * rate)) : 0;
+    m_wasRendering = false;
+}
+
+void SoundTrackAudioNode::setForceIncludeInExport(bool force)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+    m_forceIncludeInExport = force;
+}
+
 void SoundTrackAudioNode::seek(const TimePosition& position, const bool)
 {
     ONLY_AUDIO_ENGINE_THREAD;
@@ -357,7 +373,7 @@ void SoundTrackAudioNode::doSelfProcess(float* buffer, samples_t samplesPerChann
         m_wasRendering = false;
     }
 
-    if ((currentMode == ProcessMode::PlayingOffline && !m_includeInExport)
+    if ((currentMode == ProcessMode::PlayingOffline && !m_includeInExport && !m_forceIncludeInExport)
         || !data || data->frames <= 0 || outRate == 0 || outChannels == 0) {
         m_wasRendering = false;
         m_lastStartSample = startSample;

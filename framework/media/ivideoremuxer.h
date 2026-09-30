@@ -22,20 +22,23 @@
 
 #pragma once
 
-#include "modularity/ioc.h"
+#include <memory>
 
-#include "../ivideodecoderfactory.h"
-#include "../imediaconfiguration.h"
+#include "global/types/ret.h"
+#include "io/path.h"
 
 namespace muse::media {
-class VideoDecoderFactory : public IVideoDecoderFactory
+//! NOTE Combines the picture of a video file with the audio of another file into a new file, without
+//! re-encoding either (the video stream is copied as is, so there's no loss and it's fast). The
+//! output container is deduced from the destination's suffix. The audio starts with the video's
+//! first frame.
+class IVideoRemuxer
 {
-    GlobalInject<IMediaConfiguration> configuration;
-
 public:
-    io::paths_t defaultFFmpegLibsDirs() const override;
+    virtual ~IVideoRemuxer() = default;
 
-    IVideoDecoderPtr createDecoder(const io::paths_t& ffmpegLibsDirs) const override;
-    IVideoRemuxerPtr createRemuxer(const io::paths_t& ffmpegLibsDirs) const override;
+    virtual Ret remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination) = 0;
 };
+
+using IVideoRemuxerPtr = std::shared_ptr<IVideoRemuxer>;
 }

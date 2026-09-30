@@ -20,22 +20,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#pragma once
+#include "videoremuxer.h"
 
-#include "modularity/ioc.h"
+#include "ffmpeglibhandler.h"
 
-#include "../ivideodecoderfactory.h"
-#include "../imediaconfiguration.h"
+#include "global/defer.h"
+#include "log.h"
 
-namespace muse::media {
-class VideoDecoderFactory : public IVideoDecoderFactory
-{
-    GlobalInject<IMediaConfiguration> configuration;
-
-public:
-    io::paths_t defaultFFmpegLibsDirs() const override;
-
-    IVideoDecoderPtr createDecoder(const io::paths_t& ffmpegLibsDirs) const override;
-    IVideoRemuxerPtr createRemuxer(const io::paths_t& ffmpegLibsDirs) const override;
-};
+namespace muse::media::ffmpeg::v4 {
+#include "../videoremuxerimpl.inc"
 }

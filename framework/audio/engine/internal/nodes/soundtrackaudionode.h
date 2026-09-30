@@ -68,6 +68,11 @@ public:
     //! (loops, seeks, count-in, previous playbacks...)
     void setPlayheadPosition(const PlayheadPositionPtr& playheadPosition);
 
+    //! NOTE Export: where the offline rendering starts on the playback timeline (may be negative, see
+    //! SoundTrackFormat::startTime), and whether to play even if the track's own export flag is off
+    void setOfflineStart(const secs_t startTime);
+    void setForceIncludeInExport(bool force);
+
 private:
     struct Data {
         std::vector<int16_t> samples; // interleaved
@@ -110,6 +115,7 @@ private:
 
     int64_t m_offsetMs = 0;
     bool m_includeInExport = false;
+    bool m_forceIncludeInExport = false;
 
     PlayheadPositionPtr m_playheadPosition;
 

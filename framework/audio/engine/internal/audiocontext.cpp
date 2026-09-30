@@ -853,9 +853,12 @@ async::Promise<Ret> AudioContext::saveSoundTrack(io::IODevice& dstDevice, const 
 #ifdef MUSE_MODULE_AUDIO_EXPORT
         //! NOTE These engine state changes must run inside execOperation so they are
         // synchronized with the audio driver process (see doSaveSoundTrack).
-        Operation prepare = [this]() {
+        Operation prepare = [this, format]() {
             m_player->stop();
-            m_player->seek(TimePosition::zero(m_outputSpec.sampleRate));
+
+            //! NOTE A negative start is a pre-roll before 0, see doSaveSoundTrack()
+            const secs_t start = std::max(0.0, format.startTime.raw());
+            m_player->seek(TimePosition::fromTime(start, m_outputSpec.sampleRate));
         };
         if (m_execOperation) {
             m_execOperation->execOperation(OperationType::LongOperation, prepare);
@@ -982,8 +985,33 @@ Ret AudioContext::doSaveSoundTrack(io::IODevice& dstDevice, const SoundTrackForm
 #ifdef MUSE_MODULE_AUDIO_EXPORT
     using namespace muse::audio::soundtrack;
 
-    const secs_t totalDuration = m_player->duration();
+    const secs_t renderStart = std::max(0.0, format.startTime.raw());
+    const secs_t preRoll = std::max(0.0, -format.startTime.raw());
+    const secs_t totalDuration = format.duration > 0.0
+                                 ? format.duration
+                                 : secs_t(std::max(0.0, m_player->duration().raw() - renderStart.raw()));
     auto writer = std::make_shared<SoundTrackWriter>(dstDevice, format, totalDuration, m_mixer);
+
+    //! NOTE Pre-roll (the rendering starts before the playback): the sound tracks already play from the
+    //! (negative) start, while the other sources stay silent (idle) until the playback's 0
+    std::vector<AudioSourceNodePtr> otherSources;
+    std::vector<SoundTrackAudioNodePtr> soundTracks;
+    for (const Track& t : m_tracks) {
+        auto source = std::dynamic_pointer_cast<AudioSourceNode>(t.chain->source());
+        if (auto soundTrack = std::dynamic_pointer_cast<SoundTrackAudioNode>(source)) {
+            soundTracks.push_back(soundTrack);
+        } else if (source) {
+            otherSources.push_back(source);
+        }
+    }
+
+    if (preRoll > 0.0) {
+        writer->setPreRoll(preRoll, [otherSources](bool isPreRoll) {
+            for (const AudioSourceNodePtr& source : otherSources) {
+                source->setMode(isPreRoll ? ProcessMode::Idle : ProcessMode::PlayingOffline);
+            }
+        });
+    }
 
     writer->progress().progressChanged().onReceive(this, [this](int64_t current, int64_t total, std::string /*title*/) {
         m_saveSoundTracksProgress.progress.send(current, total, SaveSoundTrackStage::WritingSoundTrack);
@@ -1001,12 +1029,23 @@ Ret AudioContext::doSaveSoundTrack(io::IODevice& dstDevice, const SoundTrackForm
     // Otherwise the real time driver renders the shared graph (mixer, FX) concurrently
     // with the export, which is a data race on shared processors such as the reverb.
     Ret ret;
-    Operation func = [this, writer, &ret]() {
+    Operation func = [this, writer, &ret, &soundTracks, &format]() {
         setMode(ProcessMode::PlayingOffline);
+
+        //! NOTE Inside the operation: the real time processing would otherwise move the cursor meanwhile
+        for (const SoundTrackAudioNodePtr& soundTrack : soundTracks) {
+            soundTrack->setOfflineStart(format.startTime);
+            soundTrack->setForceIncludeInExport(format.includeSoundTracks);
+        }
+
         ret = writer->write();
         m_mixer->setOutputSpec(outputSpec());
         setMode(ProcessMode::Idle);
         m_player->seek(TimePosition::zero(m_outputSpec.sampleRate));
+
+        for (const SoundTrackAudioNodePtr& soundTrack : soundTracks) {
+            soundTrack->setForceIncludeInExport(false);
+        }
     };
 
     if (m_execOperation) {

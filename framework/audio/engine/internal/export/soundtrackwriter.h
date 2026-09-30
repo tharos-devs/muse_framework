@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <functional>
 #include <vector>
 
 #include "global/async/asyncable.h"
@@ -46,6 +47,11 @@ class SoundTrackWriter : public async::Asyncable
 public:
     SoundTrackWriter(io::IODevice& dstDevice, const SoundTrackFormat& format, const secs_t totalDuration, IAudioNodePtr source);
 
+    //! NOTE The first `duration` of the rendered audio is a pre-roll: `handler(true)` is called before
+    //! rendering it, `handler(false)` right after (see SoundTrackFormat::startTime)
+    using PreRollHandler = std::function<void (bool preRoll)>;
+    void setPreRoll(const secs_t duration, const PreRollHandler& handler);
+
     Ret write();
     void abort();
 
@@ -63,6 +69,8 @@ private:
     samples_t m_leadingSilenceSamples = 0;
     samples_t m_dataSamples = 0;
     samples_t m_totalSamples = 0;
+    samples_t m_preRollSamples = 0;
+    PreRollHandler m_preRollHandler;
 
     encode::AbstractAudioEncoderPtr m_encoderPtr;
 
