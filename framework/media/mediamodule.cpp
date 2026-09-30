@@ -27,6 +27,8 @@
 #include "ivideoencoderresolver.h"
 #include "internal/mediaconfiguration.h"
 #include "internal/videoencoderresolver.h"
+#include "ivideodecoderfactory.h"
+#include "internal/videodecoderfactory.h"
 
 using namespace muse::media;
 using namespace muse::modularity;
@@ -43,6 +45,7 @@ void MediaModule::registerExports()
 
     globalIoc()->registerExport<IMediaConfiguration>(moduleName(), m_configuration);
     globalIoc()->registerExport<IVideoEncoderResolver>(moduleName(), m_videoEncoderResolver);
+    globalIoc()->registerExport<IVideoDecoderFactory>(moduleName(), std::make_shared<VideoDecoderFactory>());
 }
 
 void MediaModule::onInit(const IApplication::RunMode&)
