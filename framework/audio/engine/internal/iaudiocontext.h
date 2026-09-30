@@ -48,6 +48,7 @@ public:
     virtual RetVal2<TrackId, TrackParams> addTrack(const TrackName& trackName, const mpe::PlaybackData& playbackData,
                                                    const TrackParams& params) = 0;
     virtual RetVal2<TrackId, TrackParams> addAuxTrack(const TrackName& trackName, const TrackParams& params) = 0;
+    virtual RetVal2<TrackId, TrackParams> addSoundTrack(const TrackName& trackName, const TrackParams& params) = 0;
 
     virtual void removeTrack(const TrackId trackId) = 0;
     virtual void removeAllTracks() = 0;

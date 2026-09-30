@@ -1,0 +1,104 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * MuseScore-CLA-applies
+ *
+ * MuseScore Studio
+ * Music Composition & Notation
+ *
+ * Copyright (C) 2026 MuseScore Limited and others
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include <vector>
+
+#include "audiosourcenode.h"
+
+#include "audio/common/audiotypes.h"
+#include "../../iplayhead.h"
+
+namespace muse::audio::engine {
+//! NOTE A source playing a pre-decoded 16-bit PCM WAV file (e.g. the audio track of an
+//! attached video) on the engine's own timeline, so it is mixed and positioned exactly like
+//! instrument tracks. The file path, offset and export flag come from the source params'
+//! configuration (see SOUND_TRACK_*_KEY in audiotypes.h).
+//! The whole file is loaded in memory when its path changes (engine thread), so the audio
+//! thread never touches the disk.
+class SoundTrackAudioNode : public AudioSourceNode
+{
+public:
+    SoundTrackAudioNode() = default;
+
+    void seek(const TimePosition& position, const bool flushSound = true) override;
+    void flush() override;
+
+    const AudioInputParams& inputParams() const override;
+    void applyInputParams(const AudioInputParams& requiredParams) override;
+    async::Channel<AudioInputParams> inputParamsChanged() const override;
+
+    void prepareToPlay() override;
+    bool readyToPlay() const override;
+    async::Notification readyToPlayChanged() const override;
+
+    bool hasPendingChunks() const override;
+    void processInput() override;
+    InputProcessingProgress inputProcessingProgress() const override;
+
+    void clearCache() override;
+
+    bool isLoaded() const;
+
+    //! NOTE While playing, the read position is taken from the playhead itself on every block (not from
+    //! a cursor of our own), so this track can't drift from the engine clock, whatever happened before
+    //! (loops, seeks, count-in, previous playbacks...)
+    void setPlayheadPosition(const PlayheadPositionPtr& playheadPosition);
+
+private:
+    void onOutputSpecChanged(const OutputSpec& spec) override;
+    void doSelfProcess(float* buffer, samples_t samplesPerChannel) override;
+
+    bool loadFile(const std::string& path);
+
+    //! NOTE Adds `frames` frames read from startFilePos (in file frames), with a linear gain ramp from
+    //! gainFrom to gainTo over the first rampFrames frames (gainTo afterwards)
+    void mixFrom(float* buffer, samples_t frames, double startFilePos, float gainFrom, float gainTo, samples_t rampFrames) const;
+
+    AudioInputParams m_params;
+    async::Channel<AudioInputParams> m_paramsChanges;
+    async::Notification m_readyToPlayChanged;
+
+    std::string m_loadedPath;
+    std::vector<int16_t> m_samples; // interleaved
+    audioch_t m_fileChannels = 0;
+    sample_rate_t m_fileSampleRate = 0;
+    int64_t m_fileFrames = 0;
+
+    double m_offsetSecs = 0.0;
+    bool m_includeInExport = false;
+
+    PlayheadPositionPtr m_playheadPosition;
+
+    //! NOTE The engine timeline position of the next frame to render, in output samples.
+    //! Only used when rendering offline (export), where the playhead doesn't move
+    int64_t m_timelineSamples = 0;
+    sample_rate_t m_lastSampleRate = 0;
+
+    //! NOTE Where the previous block ended in the file, to detect jumps and crossfade them
+    bool m_wasRendering = false;
+    double m_expectedFilePos = 0.0;
+};
+
+using SoundTrackAudioNodePtr = std::shared_ptr<SoundTrackAudioNode>;
+}

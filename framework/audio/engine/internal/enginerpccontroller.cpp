@@ -319,6 +319,25 @@ void EngineRpcController::init()
             }
         });
 
+        onLongRequest(ctxId, MsgCode::AddSoundTrack, [this](const Msg& msg) {
+            ONLY_AUDIO_RPC_THREAD;
+
+            using RetType = RetVal2<TrackId, TrackParams>;
+
+            TrackName trackName;
+            TrackParams params;
+            IF_ASSERT_FAILED(RpcPacker::unpack(msg.data, trackName, params)) {
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidRpcData)));
+            }
+
+            if (auto actx = audioContext(msg.ctxId)) {
+                RetType ret = actx->addSoundTrack(trackName, params);
+                return make_response(msg, RpcPacker::pack(ret));
+            } else {
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidContext)));
+            }
+        });
+
         onLongRequest(ctxId, MsgCode::RemoveTrack, [this](const Msg& msg) {
             ONLY_AUDIO_RPC_THREAD;
             TrackId trackId = 0;

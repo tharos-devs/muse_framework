@@ -503,6 +503,13 @@ struct AudioSourceParams {
 
 using AudioInputParams = AudioSourceParams;
 
+//! NOTE Configuration keys of a sound track's source (see IPlayback::addSoundTrack()):
+//! a pre-decoded 16-bit PCM WAV file, played on the engine's own timeline
+//! (sample read at file time = playback position + offset)
+static constexpr const char* SOUND_TRACK_FILE_PATH_KEY = "soundTrackFilePath";
+static constexpr const char* SOUND_TRACK_OFFSET_SECS_KEY = "soundTrackOffsetSecs";
+static constexpr const char* SOUND_TRACK_INCLUDE_IN_EXPORT_KEY = "soundTrackIncludeInExport";
+
 struct TrackParams {
     AudioInputParams source;
     AudioFxChain fxChain;

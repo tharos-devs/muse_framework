@@ -400,6 +400,29 @@ async::Promise<TrackId, TrackParams> Playback::addAuxTrack(const TrackName& trac
     }, PromiseType::AsyncByBody);
 }
 
+async::Promise<TrackId, TrackParams> Playback::addSoundTrack(const TrackName& trackName, const TrackParams& params)
+{
+    ONLY_AUDIO_MAIN_THREAD;
+    return async::make_promise<TrackId, TrackParams>([this, trackName, params](auto resolve, auto reject) {
+        ONLY_AUDIO_MAIN_THREAD;
+        Msg msg = rpc::make_request(ctxId(), MsgCode::AddSoundTrack, RpcPacker::pack(trackName, params));
+        channel()->send(msg, [resolve, reject](const Msg& res) {
+            ONLY_AUDIO_MAIN_THREAD;
+            RetVal2<TrackId, TrackParams> ret;
+            IF_ASSERT_FAILED(RpcPacker::unpack(res.data, ret)) {
+                doReject(MsgCode::AddSoundTrack, reject, audio::make_ret(Err::InvalidRpcData));
+                return;
+            }
+            if (ret.ret) {
+                (void)resolve(ret.val1, ret.val2);
+            } else {
+                doReject(MsgCode::AddSoundTrack, reject, ret.ret);
+            }
+        });
+        return Promise<TrackId, TrackParams>::dummy_result();
+    }, PromiseType::AsyncByBody);
+}
+
 void Playback::removeTrack(const TrackId trackId)
 {
     ONLY_AUDIO_MAIN_THREAD;
