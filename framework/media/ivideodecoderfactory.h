@@ -27,6 +27,7 @@
 
 #include "ivideodecoder.h"
 #include "ivideoremuxer.h"
+#include "ivideotranscoder.h"
 
 namespace muse::media {
 class IVideoDecoderFactory : MODULE_GLOBAL_INTERFACE
@@ -45,5 +46,7 @@ public:
     //! directories, in order, independently of the FFmpeg configured for video export. nullptr if none.
     virtual IVideoDecoderPtr createDecoder(const io::paths_t& ffmpegLibsDirs) const = 0;
     virtual IVideoRemuxerPtr createRemuxer(const io::paths_t& ffmpegLibsDirs) const = 0;
+    //! NOTE nullptr also if the FFmpeg found has no H.264 encoder
+    virtual IVideoTranscoderPtr createTranscoder(const io::paths_t& ffmpegLibsDirs) const = 0;
 };
 }

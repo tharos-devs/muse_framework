@@ -32,14 +32,19 @@
 
 #include "internal/ffmpeg/v8/videodecoder.h"
 #include "internal/ffmpeg/v8/videoremuxer.h"
+#include "internal/ffmpeg/v8/videotranscoder.h"
 #include "internal/ffmpeg/v7/videodecoder.h"
 #include "internal/ffmpeg/v7/videoremuxer.h"
+#include "internal/ffmpeg/v7/videotranscoder.h"
 #include "internal/ffmpeg/v6/videodecoder.h"
 #include "internal/ffmpeg/v6/videoremuxer.h"
+#include "internal/ffmpeg/v6/videotranscoder.h"
 #include "internal/ffmpeg/v5/videodecoder.h"
 #include "internal/ffmpeg/v5/videoremuxer.h"
+#include "internal/ffmpeg/v5/videotranscoder.h"
 #include "internal/ffmpeg/v4/videodecoder.h"
 #include "internal/ffmpeg/v4/videoremuxer.h"
+#include "internal/ffmpeg/v4/videotranscoder.h"
 
 #include "log.h"
 
@@ -134,6 +139,21 @@ IVideoRemuxerPtr VideoDecoderFactory::createRemuxer(const io::paths_t& ffmpegLib
             case FFMPEG_V6: return tryLoad<ffmpeg::v6::VideoRemuxer>(paths);
             case FFMPEG_V5: return tryLoad<ffmpeg::v5::VideoRemuxer>(paths);
             case FFMPEG_V4: return tryLoad<ffmpeg::v4::VideoRemuxer>(paths);
+            default: return nullptr;
+        }
+    });
+}
+
+IVideoTranscoderPtr VideoDecoderFactory::createTranscoder(const io::paths_t& ffmpegLibsDirs) const
+{
+    return createFromDirs<IVideoTranscoderPtr>(ffmpegLibsDirs, [](FFmpegVersion version, const FFmpegLibPaths& paths) -> IVideoTranscoderPtr {
+        switch (version) {
+            case FFMPEG_V8: return tryLoad<ffmpeg::v8::VideoTranscoder>(
+                    paths);
+            case FFMPEG_V7: return tryLoad<ffmpeg::v7::VideoTranscoder>(paths);
+            case FFMPEG_V6: return tryLoad<ffmpeg::v6::VideoTranscoder>(paths);
+            case FFMPEG_V5: return tryLoad<ffmpeg::v5::VideoTranscoder>(paths);
+            case FFMPEG_V4: return tryLoad<ffmpeg::v4::VideoTranscoder>(paths);
             default: return nullptr;
         }
     });
