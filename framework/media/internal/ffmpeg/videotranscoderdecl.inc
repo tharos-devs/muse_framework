@@ -34,4 +34,9 @@ public:
 private:
     FFmpegLibPaths m_paths;
     std::shared_ptr<FFmpegLibHandler> m_ff;
+
+    //! NOTE The first H.264 encoder that really opens (see load()), and the pixel format it takes. Opaque here (an
+    //! AVCodec* and an AVPixelFormat), this header being included where the FFmpeg headers aren't available
+    const void* m_encoder = nullptr;
+    int m_pixelFormat = 0;
 };

@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 #include "ffmpeglibhandler.h"

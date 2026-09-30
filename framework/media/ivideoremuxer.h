@@ -28,7 +28,8 @@
 #include "io/path.h"
 
 namespace muse::media {
-//! NOTE Combines the picture of a video file with the audio of another file into a new file, without
+//! NOTE Combines the picture (best video stream) of a video file with the audio (best audio stream) of another
+//! file into a new file, without
 //! re-encoding either (the video stream is copied as is, so there's no loss and it's fast). The
 //! output container is deduced from the destination's suffix. Positioning is done with timestamps,
 //! i.e. edit lists in MP4/MOV: players start exactly at the right frame, or show black meanwhile.

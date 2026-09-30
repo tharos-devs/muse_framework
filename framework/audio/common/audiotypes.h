@@ -138,10 +138,6 @@ struct SoundTrackFormat {
     secs_t leadingSilenceDuration = 0.0;
     secs_t trailingSilenceDuration = 0.0;
 
-    //! NOTE Where the rendering starts on the playback timeline. Negative: it starts before the playback
-    //! itself, the instruments staying silent until 0 while sound tracks already play (e.g. a video
-    //! starting before the score)
-    secs_t startTime = 0.0;
     //! NOTE How long to render (without the leading/trailing silences); 0: up to the end of the playback
     secs_t duration = 0.0;
     //! NOTE Include the sound tracks even if their own export flag is off
@@ -155,7 +151,6 @@ struct SoundTrackFormat {
                && bitRate == other.bitRate
                && leadingSilenceDuration == other.leadingSilenceDuration
                && trailingSilenceDuration == other.trailingSilenceDuration
-               && startTime == other.startTime
                && duration == other.duration
                && includeSoundTracks == other.includeSoundTracks;
     }

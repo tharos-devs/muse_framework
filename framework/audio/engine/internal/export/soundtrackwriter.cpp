@@ -23,7 +23,6 @@
 #include "soundtrackwriter.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 
 #include "global/defer.h"
@@ -94,18 +93,6 @@ SoundTrackWriter::SoundTrackWriter(io::IODevice& dstDevice, const SoundTrackForm
     }
 }
 
-void SoundTrackWriter::setPreRoll(const secs_t duration, const PreRollHandler& handler)
-{
-    if (!m_encoderPtr) {
-        return;
-    }
-
-    const double sec = std::max(0.0, duration.raw());
-    m_preRollSamples = std::min<samples_t>(m_dataSamples, static_cast<samples_t>(std::llround(
-                                                                                     sec * m_encoderPtr->format().outputSpec.sampleRate)));
-    m_preRollHandler = handler;
-}
-
 Ret SoundTrackWriter::write()
 {
     TRACEFUNC;
@@ -173,24 +160,11 @@ Ret SoundTrackWriter::writeStreaming()
         rpcChannel()->process();
     }
 
-    // Phase 2: actual audio data (starting with the pre-roll, if any)
+    // Phase 2: actual audio data
     const samples_t audioEnd = m_leadingSilenceSamples + m_dataSamples;
-    const samples_t preRollEnd = m_leadingSilenceSamples + m_preRollSamples;
-    bool inPreRoll = m_preRollSamples > 0 && m_preRollHandler;
-    if (inPreRoll) {
-        m_preRollHandler(true);
-    }
-
     while (framesWritten < audioEnd && !m_isAborted) {
-        if (inPreRoll && framesWritten >= preRollEnd) {
-            m_preRollHandler(false);
-            inPreRoll = false;
-        }
-
-        // A chunk never straddles the end of the pre-roll
-        const samples_t chunkEnd = inPreRoll ? preRollEnd : audioEnd;
         const samples_t chunk = static_cast<samples_t>(
-            std::min<uint64_t>(m_renderStep, chunkEnd - framesWritten));
+            std::min<uint64_t>(m_renderStep, audioEnd - framesWritten));
 
         //! NOTE The mixer mixes additively and relies on the caller to zero the output buffer
         //! (real time does this via AudioEngine::fillSilent), so clear it before each block.
@@ -206,10 +180,6 @@ Ret SoundTrackWriter::writeStreaming()
         framesWritten += chunk;
         sendProgress(framesWritten, m_totalSamples);
         rpcChannel()->process();
-    }
-
-    if (inPreRoll) {
-        m_preRollHandler(false);
     }
 
     // Phase 3: trailing silence

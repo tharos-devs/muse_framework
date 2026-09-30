@@ -58,6 +58,8 @@ public:
     int (*av_opt_set_int)(void* obj, const char* name, int64_t val, int search_flags) = nullptr;
     void*(*av_malloc)(size_t size) = nullptr;
     void (*av_frame_unref)(AVFrame* frame) = nullptr;
+    int (*av_dict_set)(AVDictionary** pm, const char* key, const char* value, int flags) = nullptr;
+    void (*av_dict_free)(AVDictionary** m) = nullptr;
 
     // libavformat
     AVStream*(*avformat_new_stream)(AVFormatContext* s, const AVCodec* c) = nullptr;
@@ -98,6 +100,10 @@ public:
     int (*avcodec_receive_frame)(AVCodecContext* avctx, AVFrame* frame) = nullptr;
     void (*avcodec_flush_buffers)(AVCodecContext* avctx) = nullptr;
     const char*(*avcodec_get_name)(enum AVCodecID id) = nullptr;
+    const AVCodec*(*avcodec_find_encoder_by_name)(const char* name) = nullptr;
+    AVPacketSideData*(*av_packet_side_data_new)(AVPacketSideData** psd, int* pnb_sd, enum AVPacketSideDataType type, size_t size,
+                                                int flags) = nullptr;
+    const AVPacketSideData*(*av_packet_side_data_get)(const AVPacketSideData* sd, int nb_sd, enum AVPacketSideDataType type) = nullptr;
     AVFrame*(*av_frame_alloc)(void) = nullptr;
     void (*av_frame_free)(AVFrame** frame) = nullptr;
     AVPacket*(*av_packet_alloc)(void) = nullptr;

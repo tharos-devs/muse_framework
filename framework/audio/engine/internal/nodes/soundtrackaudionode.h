@@ -68,9 +68,7 @@ public:
     //! (loops, seeks, count-in, previous playbacks...)
     void setPlayheadPosition(const PlayheadPositionPtr& playheadPosition);
 
-    //! NOTE Export: where the offline rendering starts on the playback timeline (may be negative, see
-    //! SoundTrackFormat::startTime), and whether to play even if the track's own export flag is off
-    void setOfflineStart(const secs_t startTime);
+    //! NOTE Export: play even if the track's own export flag is off
     void setForceIncludeInExport(bool force);
 
     //! NOTE Whether the requested file is still being loaded (an export must wait for it)

@@ -107,6 +107,12 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
     // Let the muxer pick the tags valid for its container
     videoOutStream->codecpar->codec_tag = 0;
     audioOutStream->codecpar->codec_tag = 0;
+
+    //! NOTE ...except HEVC: the muxer's default, "hev1", isn't played by Apple's players (QuickTime, Safari, iOS),
+    //! "hvc1" (parameter sets in the sample description, as they are in an MP4/MOV source) is
+    if (videoOutStream->codecpar->codec_id == AV_CODEC_ID_HEVC) {
+        videoOutStream->codecpar->codec_tag = MKTAG('h', 'v', 'c', '1');
+    }
     videoOutStream->time_base = videoInStream->time_base;
     audioOutStream->time_base = audioInStream->time_base;
 
@@ -114,7 +120,13 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
         return error("unable to create " + destination.toStdString());
     }
 
-    if (ff.avformat_write_header(out, nullptr) < 0) {
+    //! NOTE The index at the start of the file ("fast start"), better for uploading and streaming
+    AVDictionary* muxerOptions = nullptr;
+    ff.av_dict_set(&muxerOptions, "movflags", "+faststart", 0);
+    const int headerRet = ff.avformat_write_header(out, &muxerOptions);
+    ff.av_dict_free(&muxerOptions);
+
+    if (headerRet < 0) {
         //! NOTE Typically a video codec the container doesn't accept
         return error("the video's codec can't be stored in " + destination.toStdString());
     }
@@ -175,9 +187,6 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
         return ts != AV_NOPTS_VALUE ? ts * av_q2d(timeBase) : 0.0;
     };
 
-    //! NOTE Frames displayed before the end can be stored after it (B-frames): keep reading a little past it
-    constexpr double REORDER_MARGIN_SECS = 1.0;
-
     // Interleave both inputs by (output) time: the next packet written is always from the one that is behind
     bool videoEnded = false;
     bool audioEnded = false;
@@ -196,16 +205,13 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
             shift(packet, videoShift);
             lastVideoSecs = packetSecs(packet, videoTb, lastVideoSecs);
 
-            if (hasDuration) {
-                if (lastVideoSecs > options.durationSecs + REORDER_MARGIN_SECS) {
-                    ff.av_packet_unref(packet);
-                    videoEnded = true;
-                    continue;
-                }
-                if (presentationSecs(packet, videoTb) >= options.durationSecs) {
-                    ff.av_packet_unref(packet);
-                    continue;
-                }
+            //! NOTE Cut in decoding order, not by presentation time: a frame shown after the end can be a reference
+            //! of frames shown before it (B-frames), dropping it would corrupt them. At most a few frames past the
+            //! end are kept, harmless
+            if (hasDuration && lastVideoSecs >= options.durationSecs) {
+                ff.av_packet_unref(packet);
+                videoEnded = true;
+                continue;
             }
 
             ff.av_packet_rescale_ts(packet, videoTb, videoOutStream->time_base);

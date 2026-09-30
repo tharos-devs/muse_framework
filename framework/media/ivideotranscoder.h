@@ -29,7 +29,7 @@
 #include "io/path.h"
 
 namespace muse::media {
-//! NOTE Re-encodes a video's picture (same size and frame rate, H.264, no audio), preceded by a lead-in of
+//! NOTE Re-encodes a video's picture (same size, frame rate, orientation and colors, H.264, no audio), preceded by a lead-in of
 //! black frames. For when real black frames are needed before a video: a copied (not re-encoded) stream
 //! can't be extended, all its frames depending on its own encoding parameters.
 class IVideoTranscoder
@@ -42,6 +42,7 @@ public:
         double durationSecs = 0.0; // of the output (lead-in included), 0: until the video ends
         int64_t bitRate = 0;       // 0: the source video's
         std::function<void(double progress)> onProgress; // 0..1
+        std::function<bool()> isCanceled; // checked for every frame: the transcoding then stops with Ret::Code::Cancel
     };
 
     virtual Ret transcodeWithLeadIn(const io::path_t& videoSource, const io::path_t& destination, const Options& options) = 0;
