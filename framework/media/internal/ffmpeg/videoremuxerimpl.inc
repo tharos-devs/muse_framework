@@ -36,7 +36,8 @@ bool VideoRemuxer::load(const FFmpegLibPaths& paths)
     return true;
 }
 
-Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination)
+Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination,
+                        const Options& options)
 {
     if (!m_ff) {
         return make_ret(Ret::Code::InternalError, std::string("FFmpeg isn't loaded"));
@@ -118,9 +119,26 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
         return error("the video's codec can't be stored in " + destination.toStdString());
     }
 
-    //! NOTE The audio starts with the video's first frame, whose timestamp may not be 0
-    const int64_t videoStart = videoInStream->start_time != AV_NOPTS_VALUE ? videoInStream->start_time : 0;
-    const int64_t audioShift = ff.av_rescale_q(videoStart, videoInStream->time_base, audioInStream->time_base);
+    const AVRational videoTb = videoInStream->time_base;
+    const AVRational audioTb = audioInStream->time_base;
+
+    auto secsToTs = [](double secs, AVRational tb) {
+        return static_cast<int64_t>(std::llround(secs / av_q2d(tb)));
+    };
+
+    //! NOTE Output time = input time - shift. The video's time 0 is its first frame, whose timestamp may not be 0
+    const int64_t videoFirst = videoInStream->start_time != AV_NOPTS_VALUE ? videoInStream->start_time : 0;
+    const int64_t audioFirst = audioInStream->start_time != AV_NOPTS_VALUE ? audioInStream->start_time : 0;
+    const int64_t videoShift = videoFirst + secsToTs(options.videoStartSecs, videoTb);
+    const int64_t audioShift = audioFirst + secsToTs(options.audioPrimingSecs, audioTb);
+
+    //! NOTE Starting inside the video: from the keyframe before, the frames before the start get negative
+    //! timestamps, so they're decoded but not shown (edit list)
+    if (options.videoStartSecs > 0.0) {
+        ff.av_seek_frame(videoIn, videoIndex, videoShift, AVSEEK_FLAG_BACKWARD);
+    }
+
+    const bool hasDuration = options.durationSecs > 0.0;
 
     packet = ff.av_packet_alloc();
     if (!packet) {
@@ -138,28 +156,59 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
         return false;
     };
 
-    // Interleave both inputs by time: the next packet written is always from the one that is behind
-    bool videoEnded = false;
-    bool audioEnded = false;
-    double lastVideoSecs = 0.0;
-    double lastAudioSecs = 0.0;
+    auto shift = [](AVPacket* p, int64_t by) {
+        if (p->pts != AV_NOPTS_VALUE) {
+            p->pts -= by;
+        }
+        if (p->dts != AV_NOPTS_VALUE) {
+            p->dts -= by;
+        }
+    };
 
     auto packetSecs = [](const AVPacket* p, AVRational timeBase, double fallback) {
         const int64_t ts = p->dts != AV_NOPTS_VALUE ? p->dts : p->pts;
         return ts != AV_NOPTS_VALUE ? ts * av_q2d(timeBase) : fallback;
     };
 
-    while (!videoEnded || !audioEnded) {
-        const bool writeVideo = !videoEnded && (audioEnded || lastVideoSecs <= lastAudioSecs);
+    auto presentationSecs = [](const AVPacket* p, AVRational timeBase) {
+        const int64_t ts = p->pts != AV_NOPTS_VALUE ? p->pts : p->dts;
+        return ts != AV_NOPTS_VALUE ? ts * av_q2d(timeBase) : 0.0;
+    };
 
-        if (writeVideo) {
+    //! NOTE Frames displayed before the end can be stored after it (B-frames): keep reading a little past it
+    constexpr double REORDER_MARGIN_SECS = 1.0;
+
+    // Interleave both inputs by (output) time: the next packet written is always from the one that is behind
+    bool videoEnded = false;
+    bool audioEnded = false;
+    double lastVideoSecs = -1e9;
+    double lastAudioSecs = -1e9;
+
+    while (!videoEnded || !audioEnded) {
+        const bool takeVideo = !videoEnded && (audioEnded || lastVideoSecs <= lastAudioSecs);
+
+        if (takeVideo) {
             if (!readNext(videoIn, videoIndex)) {
                 videoEnded = true;
                 continue;
             }
 
-            lastVideoSecs = packetSecs(packet, videoInStream->time_base, lastVideoSecs);
-            ff.av_packet_rescale_ts(packet, videoInStream->time_base, videoOutStream->time_base);
+            shift(packet, videoShift);
+            lastVideoSecs = packetSecs(packet, videoTb, lastVideoSecs);
+
+            if (hasDuration) {
+                if (lastVideoSecs > options.durationSecs + REORDER_MARGIN_SECS) {
+                    ff.av_packet_unref(packet);
+                    videoEnded = true;
+                    continue;
+                }
+                if (presentationSecs(packet, videoTb) >= options.durationSecs) {
+                    ff.av_packet_unref(packet);
+                    continue;
+                }
+            }
+
+            ff.av_packet_rescale_ts(packet, videoTb, videoOutStream->time_base);
             packet->stream_index = videoOutStream->index;
         } else {
             if (!readNext(audioIn, audioIndex)) {
@@ -167,15 +216,16 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
                 continue;
             }
 
-            if (packet->pts != AV_NOPTS_VALUE) {
-                packet->pts += audioShift;
-            }
-            if (packet->dts != AV_NOPTS_VALUE) {
-                packet->dts += audioShift;
+            shift(packet, audioShift);
+            lastAudioSecs = packetSecs(packet, audioTb, lastAudioSecs);
+
+            if (hasDuration && presentationSecs(packet, audioTb) >= options.durationSecs) {
+                ff.av_packet_unref(packet);
+                audioEnded = true;
+                continue;
             }
 
-            lastAudioSecs = packetSecs(packet, audioInStream->time_base, lastAudioSecs);
-            ff.av_packet_rescale_ts(packet, audioInStream->time_base, audioOutStream->time_base);
+            ff.av_packet_rescale_ts(packet, audioTb, audioOutStream->time_base);
             packet->stream_index = audioOutStream->index;
         }
 

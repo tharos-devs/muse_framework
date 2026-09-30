@@ -29,7 +29,8 @@ class VideoRemuxer : public IVideoRemuxer
 public:
     bool load(const FFmpegLibPaths& paths);
 
-    Ret remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination) override;
+    Ret remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination,
+              const Options& options) override;
 
 private:
     std::shared_ptr<FFmpegLibHandler> m_ff;

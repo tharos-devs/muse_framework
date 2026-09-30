@@ -21,6 +21,9 @@
  */
 #include "audiocontext.h"
 
+#include <chrono>
+#include <thread>
+
 #include "audio/common/audiosanitizer.h"
 #include "audio/common/audioerrors.h"
 #include "audio/common/audioutils.h"
@@ -984,6 +987,17 @@ Ret AudioContext::doSaveSoundTrack(io::IODevice& dstDevice, const SoundTrackForm
 {
 #ifdef MUSE_MODULE_AUDIO_EXPORT
     using namespace muse::audio::soundtrack;
+
+    //! NOTE Sound track files are loaded in the background: an export right after opening a project (e.g.
+    //! from the command line) could otherwise render before they are, i.e. without them
+    const auto waitStart = std::chrono::steady_clock::now();
+    for (const Track& t : m_tracks) {
+        if (auto soundTrack = std::dynamic_pointer_cast<SoundTrackAudioNode>(t.chain->source())) {
+            while (soundTrack->isLoading() && std::chrono::steady_clock::now() - waitStart < std::chrono::seconds(60)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+        }
+    }
 
     const secs_t renderStart = std::max(0.0, format.startTime.raw());
     const secs_t preRoll = std::max(0.0, -format.startTime.raw());

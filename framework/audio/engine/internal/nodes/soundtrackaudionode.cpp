@@ -174,8 +174,11 @@ void SoundTrackAudioNode::requestLoad(const std::string& path)
 
         if (path.empty()) {
             loader->publish(nullptr);
+            loader->loading = false;
             return;
         }
+
+        loader->loading = true;
     }
 
     std::thread([loader, path]() {
@@ -184,8 +187,14 @@ void SoundTrackAudioNode::requestLoad(const std::string& path)
         std::lock_guard lock(loader->mutex);
         if (loader->requestedPath == path) { // not superseded by another request in the meantime
             loader->publish(data);
+            loader->loading = false;
         }
     }).detach();
+}
+
+bool SoundTrackAudioNode::isLoading() const
+{
+    return m_loader->loading.load();
 }
 
 void SoundTrackAudioNode::Loader::publish(const std::shared_ptr<const Data>& data)

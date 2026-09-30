@@ -22,6 +22,8 @@
 
 #include "videoremuxer.h"
 
+#include <cmath>
+
 #include "ffmpeglibhandler.h"
 
 #include "global/defer.h"

@@ -30,14 +30,25 @@
 namespace muse::media {
 //! NOTE Combines the picture of a video file with the audio of another file into a new file, without
 //! re-encoding either (the video stream is copied as is, so there's no loss and it's fast). The
-//! output container is deduced from the destination's suffix. The audio starts with the video's
-//! first frame.
+//! output container is deduced from the destination's suffix. Positioning is done with timestamps,
+//! i.e. edit lists in MP4/MOV: players start exactly at the right frame, or show black meanwhile.
 class IVideoRemuxer
 {
 public:
     virtual ~IVideoRemuxer() = default;
 
-    virtual Ret remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination) = 0;
+    struct Options {
+        //! NOTE The video time shown at the output's start (from the video's first frame). Negative: the
+        //! video only starts that much later in the output (black before)
+        double videoStartSecs = 0.0;
+        //! NOTE The output's duration, 0: until both inputs end
+        double durationSecs = 0.0;
+        //! NOTE The audio encoder's priming (e.g. 2048 samples for AAC-LC), skipped at playback
+        double audioPrimingSecs = 0.0;
+    };
+
+    virtual Ret remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination,
+                      const Options& options) = 0;
 };
 
 using IVideoRemuxerPtr = std::shared_ptr<IVideoRemuxer>;
