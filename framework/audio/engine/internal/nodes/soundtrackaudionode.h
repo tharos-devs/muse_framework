@@ -22,6 +22,10 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "audiosourcenode.h"
@@ -34,12 +38,13 @@ namespace muse::audio::engine {
 //! attached video) on the engine's own timeline, so it is mixed and positioned exactly like
 //! instrument tracks. The file path, offset and export flag come from the source params'
 //! configuration (see SOUND_TRACK_*_KEY in audiotypes.h).
-//! The whole file is loaded in memory when its path changes (engine thread), so the audio
-//! thread never touches the disk.
+//! The whole file is loaded in memory by a background thread when its path changes, then handed
+//! over atomically: neither the audio thread nor the engine thread ever waits for the disk (the
+//! track is silent until it's loaded).
 class SoundTrackAudioNode : public AudioSourceNode
 {
 public:
-    SoundTrackAudioNode() = default;
+    SoundTrackAudioNode();
 
     void seek(const TimePosition& position, const bool flushSound = true) override;
     void flush() override;
@@ -58,34 +63,49 @@ public:
 
     void clearCache() override;
 
-    bool isLoaded() const;
-
     //! NOTE While playing, the read position is taken from the playhead itself on every block (not from
     //! a cursor of our own), so this track can't drift from the engine clock, whatever happened before
     //! (loops, seeks, count-in, previous playbacks...)
     void setPlayheadPosition(const PlayheadPositionPtr& playheadPosition);
 
 private:
+    struct Data {
+        std::vector<int16_t> samples; // interleaved
+        audioch_t channels = 0;
+        sample_rate_t sampleRate = 0;
+        int64_t frames = 0;
+    };
+
+    //! NOTE Shared with the loading thread, which may outlive the node
+    struct Loader {
+        std::mutex mutex;
+        std::string requestedPath;
+        std::shared_ptr<const Data> current;
+        //! NOTE Kept alive until the next load, so that the audio thread (which reads `active`) never
+        //! holds the last reference to the data it's reading, nor frees it
+        std::shared_ptr<const Data> retired;
+        std::atomic<const Data*> active { nullptr };
+    };
+
+    static std::shared_ptr<const Data> loadFile(const std::string& path);
+    void requestLoad(const std::string& path);
+
     void onOutputSpecChanged(const OutputSpec& spec) override;
     void doSelfProcess(float* buffer, samples_t samplesPerChannel) override;
 
-    bool loadFile(const std::string& path);
-
     //! NOTE Adds `frames` frames read from startFilePos (in file frames), with a linear gain ramp from
     //! gainFrom to gainTo over the first rampFrames frames (gainTo afterwards)
-    void mixFrom(float* buffer, samples_t frames, double startFilePos, float gainFrom, float gainTo, samples_t rampFrames) const;
+    void mixFrom(const Data& data, float* buffer, samples_t frames, double startFilePos, float gainFrom, float gainTo,
+                 samples_t rampFrames) const;
 
     AudioInputParams m_params;
     async::Channel<AudioInputParams> m_paramsChanges;
     async::Notification m_readyToPlayChanged;
 
-    std::string m_loadedPath;
-    std::vector<int16_t> m_samples; // interleaved
-    audioch_t m_fileChannels = 0;
-    sample_rate_t m_fileSampleRate = 0;
-    int64_t m_fileFrames = 0;
+    std::shared_ptr<Loader> m_loader;
+    std::string m_requestedPath;
 
-    double m_offsetSecs = 0.0;
+    int64_t m_offsetMs = 0;
     bool m_includeInExport = false;
 
     PlayheadPositionPtr m_playheadPosition;
@@ -95,9 +115,14 @@ private:
     int64_t m_timelineSamples = 0;
     sample_rate_t m_lastSampleRate = 0;
 
-    //! NOTE Where the previous block ended in the file, to detect jumps and crossfade them
+    //! NOTE Where the previous block ended in the file, to detect jumps and crossfade them. Only valid if
+    //! that block was the one just before: m_wasRendering is cleared whenever the rendering stops
+    //! (pause, stop, mute, idle...), which is detected from the time elapsed since the last block
     bool m_wasRendering = false;
     double m_expectedFilePos = 0.0;
+    int64_t m_lastStartSample = -1;
+    int64_t m_lastRenderTimeUs = 0;
+    const Data* m_lastData = nullptr;
 };
 
 using SoundTrackAudioNodePtr = std::shared_ptr<SoundTrackAudioNode>;

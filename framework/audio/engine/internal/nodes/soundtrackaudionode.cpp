@@ -22,9 +22,15 @@
 
 #include "soundtrackaudionode.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <new>
+#include <thread>
 
 #include "audio/common/audiosanitizer.h"
 
@@ -37,6 +43,10 @@ using namespace muse::audio::engine;
 namespace {
 constexpr float INT16_TO_FLOAT = 1.f / 32768.f;
 constexpr double CROSSFADE_SECS = 0.005;
+
+//! NOTE A gap longer than this since the previous block means the rendering stopped in between
+//! (pause, stop, mute, not processed while idle...): the previous position is then stale
+constexpr int64_t RENDERING_STOPPED_AFTER_US = 100'000;
 
 std::string configValue(const AudioUnitConfig& config, const char* key)
 {
@@ -56,33 +66,34 @@ uint16_t readLE16(const char* p)
 {
     return static_cast<uint16_t>(static_cast<uint8_t>(p[0]) | (static_cast<uint8_t>(p[1]) << 8));
 }
+
+int64_t nowUs()
+{
+    return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 }
 
-bool SoundTrackAudioNode::loadFile(const std::string& path)
+SoundTrackAudioNode::SoundTrackAudioNode()
+    : m_loader(std::make_shared<Loader>())
 {
-    ONLY_AUDIO_ENGINE_THREAD;
+    setName("Source[SoundTrack]");
+}
 
-    m_samples.clear();
-    m_samples.shrink_to_fit();
-    m_fileChannels = 0;
-    m_fileSampleRate = 0;
-    m_fileFrames = 0;
-    m_loadedPath.clear();
-
-    if (path.empty()) {
-        return false;
-    }
-
-    std::ifstream file(path, std::ios::binary);
+std::shared_ptr<const SoundTrackAudioNode::Data> SoundTrackAudioNode::loadFile(const std::string& path)
+{
+    //! NOTE The path is UTF-8: going through std::filesystem::path makes it work with non-ASCII paths
+    //! on Windows too, where a narrow std::string path would be read in the ANSI code page
+    const std::u8string u8path(reinterpret_cast<const char8_t*>(path.data()), path.size());
+    std::ifstream file(std::filesystem::path(u8path), std::ios::binary);
     if (!file) {
         LOGE() << "failed to open sound track file: " << path;
-        return false;
+        return nullptr;
     }
 
     char riff[12];
     if (!file.read(riff, 12) || std::memcmp(riff, "RIFF", 4) != 0 || std::memcmp(riff + 8, "WAVE", 4) != 0) {
         LOGE() << "not a WAV file: " << path;
-        return false;
+        return nullptr;
     }
 
     uint16_t format = 0;
@@ -108,35 +119,72 @@ bool SoundTrackAudioNode::loadFile(const std::string& path)
         }
 
         if (std::memcmp(chunkHeader, "data", 4) == 0) {
+            //! NOTE Only the plain 16-bit PCM written by the app's own decoder is supported; more channels
+            //! than the output has are dropped, not downmixed (the decoder always writes stereo)
             if (format != 1 || bitsPerSample != 16 || channels == 0 || sampleRate == 0) {
                 LOGE() << "unsupported WAV format (16-bit PCM expected): " << path;
-                return false;
+                return nullptr;
             }
 
-            m_samples.resize(chunkSize / sizeof(int16_t));
-            file.read(reinterpret_cast<char*>(m_samples.data()), static_cast<std::streamsize>(m_samples.size() * sizeof(int16_t)));
-            m_samples.resize(static_cast<size_t>(file.gcount()) / sizeof(int16_t));
+            auto data = std::make_shared<Data>();
+            try {
+                data->samples.resize(chunkSize / sizeof(int16_t));
+            } catch (const std::bad_alloc&) {
+                LOGE() << "not enough memory to load the sound track: " << path << " (" << chunkSize << " bytes)";
+                return nullptr;
+            }
 
-            m_fileChannels = channels;
-            m_fileSampleRate = sampleRate;
-            m_fileFrames = static_cast<int64_t>(m_samples.size() / channels);
-            m_loadedPath = path;
+            file.read(reinterpret_cast<char*>(data->samples.data()), static_cast<std::streamsize>(data->samples.size() * sizeof(int16_t)));
+            data->samples.resize(static_cast<size_t>(file.gcount()) / sizeof(int16_t));
 
-            LOGI() << "sound track loaded: " << path << ", " << m_fileFrames << " frames, "
+            data->channels = channels;
+            data->sampleRate = sampleRate;
+            data->frames = static_cast<int64_t>(data->samples.size() / channels);
+
+            LOGI() << "sound track loaded: " << path << ", " << data->frames << " frames, "
                    << channels << " ch, " << sampleRate << " Hz";
-            return true;
+            return data;
         }
 
         file.seekg(chunkSize + (chunkSize & 1), std::ios::cur);
     }
 
     LOGE() << "no data chunk in WAV file: " << path;
-    return false;
+    return nullptr;
 }
 
-bool SoundTrackAudioNode::isLoaded() const
+void SoundTrackAudioNode::requestLoad(const std::string& path)
 {
-    return m_fileFrames > 0;
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    m_requestedPath = path;
+
+    std::shared_ptr<Loader> loader = m_loader;
+
+    auto publish = [loader](const std::shared_ptr<const Data>& data) {
+        loader->retired = loader->current;
+        loader->current = data;
+        loader->active.store(data.get(), std::memory_order_release);
+    };
+
+    {
+        std::lock_guard lock(loader->mutex);
+        loader->requestedPath = path;
+
+        if (path.empty()) {
+            publish(nullptr);
+            return;
+        }
+    }
+
+    std::thread([loader, path, publish]() {
+        std::shared_ptr<const Data> data = loadFile(path);
+
+        std::lock_guard lock(loader->mutex);
+        if (loader->requestedPath == path) { // not superseded by another request in the meantime
+            publish(data);
+        }
+    }).detach();
 }
 
 void SoundTrackAudioNode::setPlayheadPosition(const PlayheadPositionPtr& playheadPosition)
@@ -158,6 +206,11 @@ void SoundTrackAudioNode::seek(const TimePosition& position, const bool)
 
 void SoundTrackAudioNode::flush()
 {
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    //! NOTE Called on pause/stop: whatever comes next doesn't continue the previous block
+    m_wasRendering = false;
+    m_lastStartSample = -1;
 }
 
 const AudioInputParams& SoundTrackAudioNode::inputParams() const
@@ -169,18 +222,17 @@ void SoundTrackAudioNode::applyInputParams(const AudioInputParams& requiredParam
 {
     ONLY_AUDIO_ENGINE_THREAD;
 
+    //! NOTE Compared to the requested path (not the loaded one), so a file that fails to load isn't
+    //! retried on every params change
     const std::string path = configValue(requiredParams.configuration, SOUND_TRACK_FILE_PATH_KEY);
-    if (path != m_loadedPath) {
-        loadFile(path);
-        m_readyToPlayChanged.notify();
+    if (path != m_requestedPath) {
+        requestLoad(path);
     }
 
-    const std::string offset = configValue(requiredParams.configuration, SOUND_TRACK_OFFSET_SECS_KEY);
-    m_offsetSecs = offset.empty() ? 0.0 : std::strtod(offset.c_str(), nullptr);
+    const std::string offset = configValue(requiredParams.configuration, SOUND_TRACK_OFFSET_MS_KEY);
+    m_offsetMs = offset.empty() ? 0 : std::strtoll(offset.c_str(), nullptr, 10);
 
     m_includeInExport = configValue(requiredParams.configuration, SOUND_TRACK_INCLUDE_IN_EXPORT_KEY) == "1";
-
-    setName(std::string("Source[SoundTrack]"));
 
     if (m_params != requiredParams) {
         m_params = requiredParams;
@@ -199,7 +251,7 @@ void SoundTrackAudioNode::prepareToPlay()
 
 bool SoundTrackAudioNode::readyToPlay() const
 {
-    //! NOTE The file is fully loaded in applyInputParams(), nothing to wait for
+    //! NOTE Never waited for: the track is just silent until its file is loaded
     return true;
 }
 
@@ -237,6 +289,7 @@ void SoundTrackAudioNode::onOutputSpecChanged(const OutputSpec& spec)
     }
 
     m_lastSampleRate = spec.sampleRate;
+    m_wasRendering = false;
 }
 
 void SoundTrackAudioNode::doSelfProcess(float* buffer, samples_t samplesPerChannel)
@@ -253,7 +306,8 @@ void SoundTrackAudioNode::doSelfProcess(float* buffer, samples_t samplesPerChann
     const audioch_t outChannels = m_outputSpec.audioChannelCount;
 
     int64_t startSample = m_timelineSamples;
-    if (currentMode == ProcessMode::Playing && m_playheadPosition && outRate > 0) {
+    const bool followsPlayhead = currentMode == ProcessMode::Playing && m_playheadPosition && outRate > 0;
+    if (followsPlayhead) {
         //! NOTE The playhead is forwarded after the whole chain is processed (see PlayheadNode),
         //! so this is the engine position of this block's first frame
         const TimePosition& position = m_playheadPosition->currentPosition();
@@ -266,48 +320,73 @@ void SoundTrackAudioNode::doSelfProcess(float* buffer, samples_t samplesPerChann
 
     m_timelineSamples = startSample + samplesPerChannel;
 
-    if ((currentMode == ProcessMode::PlayingOffline && !m_includeInExport)
-        || !isLoaded() || outRate == 0 || outChannels == 0) {
+    const int64_t now = nowUs();
+    if (m_wasRendering && now - m_lastRenderTimeUs > RENDERING_STOPPED_AFTER_US) {
         m_wasRendering = false;
+    }
+    m_lastRenderTimeUs = now;
+
+    const Data* data = m_loader->active.load(std::memory_order_acquire);
+    if (data != m_lastData) {
+        m_lastData = data;
+        m_wasRendering = false;
+    }
+
+    if ((currentMode == ProcessMode::PlayingOffline && !m_includeInExport)
+        || !data || data->frames <= 0 || outRate == 0 || outChannels == 0) {
+        m_wasRendering = false;
+        m_lastStartSample = startSample;
         return;
     }
 
+    const samples_t rampFrames = std::min<samples_t>(samplesPerChannel, static_cast<samples_t>(outRate * CROSSFADE_SECS));
+
+    //! NOTE The playhead can stay still while playing (e.g. at the end of the score, until the engine
+    //! pauses): rendering the same block again would repeat it, so fade out once and stay silent
+    if (followsPlayhead && startSample == m_lastStartSample) {
+        if (m_wasRendering) {
+            mixFrom(*data, buffer, rampFrames, m_expectedFilePos, 1.f, 0.f, rampFrames);
+            m_wasRendering = false;
+        }
+        return;
+    }
+    m_lastStartSample = startSample;
+
     // File frame corresponding to the first output frame
-    const double startFilePos = (static_cast<double>(startSample) / outRate + m_offsetSecs) * m_fileSampleRate;
+    const double startFilePos = (static_cast<double>(startSample) / outRate + m_offsetMs / 1000.0) * data->sampleRate;
 
     //! NOTE Any jump of the read position (seek or loop wrap while playing, offset change, start of
     //! playback) is crossfaded over a few ms instead of cutting the waveform abruptly, which clicks.
     //! The continuation of the previous position is still in the file, so it can be faded out.
-    const samples_t rampFrames = std::min<samples_t>(samplesPerChannel, static_cast<samples_t>(outRate * CROSSFADE_SECS));
     const bool continuous = m_wasRendering && std::abs(startFilePos - m_expectedFilePos) < 0.5;
 
     if (continuous) {
-        mixFrom(buffer, samplesPerChannel, startFilePos, 1.f, 1.f, 0);
+        mixFrom(*data, buffer, samplesPerChannel, startFilePos, 1.f, 1.f, 0);
     } else {
-        mixFrom(buffer, samplesPerChannel, startFilePos, 0.f, 1.f, rampFrames);
+        mixFrom(*data, buffer, samplesPerChannel, startFilePos, 0.f, 1.f, rampFrames);
 
         if (m_wasRendering) {
-            mixFrom(buffer, rampFrames, m_expectedFilePos, 1.f, 0.f, rampFrames);
+            mixFrom(*data, buffer, rampFrames, m_expectedFilePos, 1.f, 0.f, rampFrames);
         }
     }
 
-    const double step = static_cast<double>(m_fileSampleRate) / outRate;
+    const double step = static_cast<double>(data->sampleRate) / outRate;
     m_expectedFilePos = startFilePos + samplesPerChannel * step;
     m_wasRendering = true;
 }
 
-void SoundTrackAudioNode::mixFrom(float* buffer, samples_t frames, double startFilePos, float gainFrom, float gainTo,
-                                  samples_t rampFrames) const
+void SoundTrackAudioNode::mixFrom(const Data& data, float* buffer, samples_t frames, double startFilePos, float gainFrom,
+                                  float gainTo, samples_t rampFrames) const
 {
     const sample_rate_t outRate = m_outputSpec.sampleRate;
     const audioch_t outChannels = m_outputSpec.audioChannelCount;
 
     // File frames per output frame
-    const double step = static_cast<double>(m_fileSampleRate) / outRate;
+    const double step = static_cast<double>(data.sampleRate) / outRate;
 
-    const int16_t* data = m_samples.data();
-    const audioch_t fileChannels = m_fileChannels;
-    const bool sameRate = m_fileSampleRate == outRate;
+    const int16_t* samples = data.samples.data();
+    const audioch_t fileChannels = data.channels;
+    const bool sameRate = data.sampleRate == outRate;
     const int64_t startFrameInt = static_cast<int64_t>(std::llround(startFilePos));
 
     for (samples_t i = 0; i < frames; ++i) {
@@ -320,26 +399,28 @@ void SoundTrackAudioNode::mixFrom(float* buffer, samples_t frames, double startF
 
         if (sameRate) {
             const int64_t frame = startFrameInt + i;
-            if (frame < 0 || frame >= m_fileFrames) {
+            if (frame < 0 || frame >= data.frames) {
                 continue;
             }
 
-            const int16_t* in = data + frame * fileChannels;
+            const int16_t* in = samples + frame * fileChannels;
             for (audioch_t ch = 0; ch < outChannels; ++ch) {
                 out[ch] += in[std::min<audioch_t>(ch, fileChannels - 1)] * scale;
             }
             continue;
         }
 
+        //! NOTE Linear interpolation: only used when the file's rate differs from the output's (the app
+        //! decodes at the engine's rate, so in practice only for an export at another sample rate)
         const double pos = startFilePos + i * step;
         const double floorPos = std::floor(pos);
         const int64_t frame = static_cast<int64_t>(floorPos);
-        if (frame < 0 || frame + 1 >= m_fileFrames) {
+        if (frame < 0 || frame + 1 >= data.frames) {
             continue;
         }
 
         const float frac = static_cast<float>(pos - floorPos);
-        const int16_t* a = data + frame * fileChannels;
+        const int16_t* a = samples + frame * fileChannels;
         const int16_t* b = a + fileChannels;
         for (audioch_t ch = 0; ch < outChannels; ++ch) {
             const audioch_t fileCh = std::min<audioch_t>(ch, fileChannels - 1);

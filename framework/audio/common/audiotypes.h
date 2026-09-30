@@ -504,10 +504,11 @@ struct AudioSourceParams {
 using AudioInputParams = AudioSourceParams;
 
 //! NOTE Configuration keys of a sound track's source (see IPlayback::addSoundTrack()):
-//! a pre-decoded 16-bit PCM WAV file, played on the engine's own timeline
-//! (sample read at file time = playback position + offset)
+//! a pre-decoded 16-bit PCM WAV file (UTF-8 path), played on the engine's own timeline
+//! (sample read at file time = playback position + offset). The offset is an integer number of
+//! milliseconds, so that its text form doesn't depend on the locale; the export flag is "1" or "0"
 static constexpr const char* SOUND_TRACK_FILE_PATH_KEY = "soundTrackFilePath";
-static constexpr const char* SOUND_TRACK_OFFSET_SECS_KEY = "soundTrackOffsetSecs";
+static constexpr const char* SOUND_TRACK_OFFSET_MS_KEY = "soundTrackOffsetMs";
 static constexpr const char* SOUND_TRACK_INCLUDE_IN_EXPORT_KEY = "soundTrackIncludeInExport";
 
 struct TrackParams {
