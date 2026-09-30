@@ -106,7 +106,15 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
         }
 
         m_countDown = 0.;
+        m_waitingForActivation = true;
         m_timeEvent.send(TimeEvent { TimeEventType::CountDownEnded, m_currentPosition }); // forwarding an event to the engine thread
+    }
+
+    //! NOTE The sources only start playing once the engine thread has handled CountDownEnded, up to one
+    //! engine cycle later: the position must not move before, or the sources would start late relative
+    //! to it by a varying amount (a different sync with the position-driven video picture every time)
+    if (m_waitingForActivation) {
+        return m_currentPosition;
     }
 
     // Check: Loop
@@ -140,6 +148,7 @@ void ContextPlayer::onTimeEvent(const TimeEvent event)
     case TimeEventType::CountDownEnded:
         exec(OperationType::QuickOperation, [this]() {
             m_isActive.set(m_status.val == PlaybackStatus::Running);
+            m_waitingForActivation = false;
         });
         break;
     case TimeEventType::LoopEnded:
@@ -180,6 +189,7 @@ void ContextPlayer::play(const secs_t delay)
     }
 
     m_countDown = delay;
+    m_waitingForActivation = false;
     m_status.set(PlaybackStatus::Running);
 }
 
@@ -220,6 +230,7 @@ void ContextPlayer::stop()
 
     m_status.set(PlaybackStatus::Stopped);
     m_countDown = 0.;
+    m_waitingForActivation = false;
     seek(TimePosition::zero(m_currentPosition.sampleRate()));
     m_notYetReadyToPlayTracks.clear();
 }
@@ -234,6 +245,7 @@ void ContextPlayer::pause()
     }
 
     m_status.set(PlaybackStatus::Paused);
+    m_waitingForActivation = false;
     m_notYetReadyToPlayTracks.clear();
 }
 
@@ -247,6 +259,7 @@ void ContextPlayer::resume(const secs_t delay)
     }
 
     m_countDown = delay;
+    m_waitingForActivation = false;
     seek(m_currentPosition);
     m_status.set(PlaybackStatus::Running);
 }

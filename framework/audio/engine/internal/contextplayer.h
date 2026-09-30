@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "global/types/retval.h"
 #include "global/async/channel.h"
 #include "global/async/asyncable.h"
@@ -105,6 +107,10 @@ private:
 
     secs_t m_timeDuration = 0.;
     secs_t m_countDown = 0.;
+
+    //! NOTE Set by the processing thread when the count-down ends, cleared by the engine thread once
+    //! it has activated the sources: the position is held meanwhile (see proc_onTimeChanged())
+    std::atomic<bool> m_waitingForActivation = false;
     secs_t m_timeLoopStart = 0.;
     secs_t m_timeLoopEnd = 0.;
 

@@ -26,6 +26,7 @@
 #include "audio/common/audioutils.h"
 
 #include "nodes/trackchain.h"
+#include "nodes/soundtrackaudionode.h"
 
 #include "contextplayer.h"
 
@@ -269,6 +270,57 @@ RetVal2<TrackId, TrackParams> AudioContext::addAuxTrack(const std::string& track
     // Make track info
     Track track;
     track.type = TrackType::Aux_track;
+    track.id = trackId;
+    track.name = trackName;
+    track.params = params;
+    track.chain = trackChain;
+
+    onFxChainParamsChanged(track, params.fxChain);
+    onControlParamsChanged(track, params.control);
+
+    doAddTrack(track);
+
+    return RetType::make_ok(trackId, track.params);
+}
+
+RetVal2<TrackId, TrackParams> AudioContext::addSoundTrack(const std::string& trackName,
+                                                          const TrackParams& params)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    using RetType = RetVal2<TrackId, TrackParams>;
+
+    TrackId trackId = newTrackId();
+
+    SoundTrackAudioNodePtr source = std::make_shared<SoundTrackAudioNode>();
+    source->setPlayheadPosition(std::static_pointer_cast<IPlayheadPosition>(m_player));
+    source->setOutputSpec(outputSpec());
+    source->setMode(mode());
+    //! NOTE An empty/unloadable file is not an error: the track then stays silent until
+    //! setSourceParams() gives it one (e.g. while the video's audio is still being decoded)
+    source->applyInputParams(params.source);
+
+    AutomationControlNodePtr controlNode = std::make_shared<AutomationControlNode>();
+    controlNode->setPlayheadPosition(std::static_pointer_cast<IPlayheadPosition>(m_player));
+
+    TrackChainPtr trackChain = std::make_shared<TrackChain>(trackId, trackName);
+    trackChain->setOutputSpec(outputSpec());
+    trackChain->setMode(mode());
+    trackChain->setSource(source);
+    trackChain->setFxChain(nullptr); // will be added later
+    trackChain->setGain(std::make_shared<GainNode>());
+    trackChain->setControl(controlNode);
+    trackChain->setSignal(std::make_shared<SignalNode>());
+    trackChain->rebuild();
+
+    Ret ret = m_mixer->addTrack(trackChain, params.auxSends);
+    if (!ret) {
+        return RetType::make_ret(ret);
+    }
+
+    // Make track info
+    Track track;
+    track.type = TrackType::Sound_track;
     track.id = trackId;
     track.name = trackName;
     track.params = params;

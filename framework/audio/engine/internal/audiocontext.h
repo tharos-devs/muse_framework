@@ -68,6 +68,7 @@ public:
     RetVal2<TrackId, TrackParams> addTrack(const std::string& trackName, const mpe::PlaybackData& playbackData,
                                            const TrackParams& params) override;
     RetVal2<TrackId, TrackParams> addAuxTrack(const std::string& trackName, const TrackParams& params) override;
+    RetVal2<TrackId, TrackParams> addSoundTrack(const std::string& trackName, const TrackParams& params) override;
 
     void removeTrack(const TrackId trackId) override;
     void removeAllTracks() override;

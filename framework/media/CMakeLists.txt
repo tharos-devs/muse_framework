@@ -28,6 +28,8 @@ target_sources(muse_media PRIVATE
 
     ivideoencoder.h
     ivideoencoderresolver.h
+    ivideodecoder.h
+    ivideodecoderfactory.h
 
     internal/mediaconfiguration.cpp
     internal/videoencoderresolver.cpp
@@ -37,58 +39,78 @@ target_sources(muse_media PRIVATE
     internal/ffmpegutils.cpp
     internal/ffmpegutils.h
 
+    internal/videodecoderfactory.cpp
+    internal/videodecoderfactory.h
+    internal/ffmpeg/videodecoderdecl.inc
+    internal/ffmpeg/videodecoderimpl.inc
+
     internal/ffmpeg/v8/ffmpeglibhandler.cpp
     internal/ffmpeg/v8/ffmpeglibhandler.h
     internal/ffmpeg/v8/videoencoder.cpp
     internal/ffmpeg/v8/videoencoder.h
+    internal/ffmpeg/v8/videodecoder.cpp
+    internal/ffmpeg/v8/videodecoder.h
 
     internal/ffmpeg/v7/ffmpeglibhandler.cpp
     internal/ffmpeg/v7/ffmpeglibhandler.h
     internal/ffmpeg/v7/videoencoder.cpp
     internal/ffmpeg/v7/videoencoder.h
+    internal/ffmpeg/v7/videodecoder.cpp
+    internal/ffmpeg/v7/videodecoder.h
 
     internal/ffmpeg/v6/ffmpeglibhandler.cpp
     internal/ffmpeg/v6/ffmpeglibhandler.h
     internal/ffmpeg/v6/videoencoder.cpp
     internal/ffmpeg/v6/videoencoder.h
+    internal/ffmpeg/v6/videodecoder.cpp
+    internal/ffmpeg/v6/videodecoder.h
 
     internal/ffmpeg/v5/ffmpeglibhandler.cpp
     internal/ffmpeg/v5/ffmpeglibhandler.h
     internal/ffmpeg/v5/videoencoder.cpp
     internal/ffmpeg/v5/videoencoder.h
+    internal/ffmpeg/v5/videodecoder.cpp
+    internal/ffmpeg/v5/videodecoder.h
 
     internal/ffmpeg/v4/ffmpeglibhandler.cpp
     internal/ffmpeg/v4/ffmpeglibhandler.h
     internal/ffmpeg/v4/videoencoder.cpp
     internal/ffmpeg/v4/videoencoder.h
+    internal/ffmpeg/v4/videodecoder.cpp
+    internal/ffmpeg/v4/videodecoder.h
 )
 
 set_source_files_properties(
     internal/ffmpeg/v8/ffmpeglibhandler.cpp
     internal/ffmpeg/v8/videoencoder.cpp
+    internal/ffmpeg/v8/videodecoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v8"
 )
 
 set_source_files_properties(
     internal/ffmpeg/v7/ffmpeglibhandler.cpp
     internal/ffmpeg/v7/videoencoder.cpp
+    internal/ffmpeg/v7/videodecoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v7"
 )
 
 set_source_files_properties(
     internal/ffmpeg/v6/ffmpeglibhandler.cpp
     internal/ffmpeg/v6/videoencoder.cpp
+    internal/ffmpeg/v6/videodecoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v6"
 )
 
 set_source_files_properties(
     internal/ffmpeg/v5/ffmpeglibhandler.cpp
     internal/ffmpeg/v5/videoencoder.cpp
+    internal/ffmpeg/v5/videodecoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v5"
 )
 
 set_source_files_properties(
     internal/ffmpeg/v4/ffmpeglibhandler.cpp
     internal/ffmpeg/v4/videoencoder.cpp
+    internal/ffmpeg/v4/videodecoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v4"
 )

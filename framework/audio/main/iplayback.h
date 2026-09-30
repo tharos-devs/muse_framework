@@ -66,6 +66,11 @@ public:
 
     virtual async::Promise<TrackId, TrackParams> addAuxTrack(const TrackName& trackName, const TrackParams& params) = 0;
 
+    //! NOTE A track playing a pre-decoded 16-bit PCM WAV file on the engine's timeline, e.g. the audio of
+    //! an attached video. The file path, offset and export flag are set in params.source.configuration
+    //! (see SOUND_TRACK_*_KEY in audiotypes.h) and can be changed later via setSourceParams()
+    virtual async::Promise<TrackId, TrackParams> addSoundTrack(const TrackName& trackName, const TrackParams& params) = 0;
+
     virtual void removeTrack(const TrackId trackId) = 0;
     virtual void removeAllTracks() = 0;
 

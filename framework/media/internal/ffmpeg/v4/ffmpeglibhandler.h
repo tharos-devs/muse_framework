@@ -57,6 +57,7 @@ public:
     int (*av_image_get_buffer_size)(AVPixelFormat pix_fmt, int width, int height, int align) = nullptr;
     int (*av_opt_set_int)(void* obj, const char* name, int64_t val, int search_flags) = nullptr;
     void*(*av_malloc)(size_t size) = nullptr;
+    void (*av_frame_unref)(AVFrame* frame) = nullptr;
 
     // libavformat
     AVStream*(*avformat_new_stream)(AVFormatContext* s, const AVCodec* c) = nullptr;
@@ -78,6 +79,9 @@ public:
                                       int (*write_packet)(void* opaque, const uint8_t* buf, int buf_size),
                                       int64_t (*seek)(void* opaque, int64_t offset, int whence)) = nullptr;
     void (*avio_context_free)(AVIOContext** s) = nullptr;
+    int (*av_seek_frame)(AVFormatContext* s, int stream_index, int64_t timestamp, int flags) = nullptr;
+    int (*av_find_best_stream)(AVFormatContext* ic, enum AVMediaType type, int wanted_stream_nb, int related_stream,
+                               const AVCodec** decoder_ret, int flags) = nullptr;
 
     // libavcodec
     AVCodecContext*(*avcodec_alloc_context3)(const AVCodec* codec) = nullptr;
@@ -92,6 +96,8 @@ public:
     int (*avcodec_receive_packet)(AVCodecContext* avctx, AVPacket* avpkt) = nullptr;
     int (*avcodec_send_packet)(AVCodecContext* avctx, const AVPacket* avpkt) = nullptr;
     int (*avcodec_receive_frame)(AVCodecContext* avctx, AVFrame* frame) = nullptr;
+    void (*avcodec_flush_buffers)(AVCodecContext* avctx) = nullptr;
+    const char*(*avcodec_get_name)(enum AVCodecID id) = nullptr;
     AVFrame*(*av_frame_alloc)(void) = nullptr;
     void (*av_frame_free)(AVFrame** frame) = nullptr;
     AVPacket*(*av_packet_alloc)(void) = nullptr;
