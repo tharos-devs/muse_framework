@@ -174,8 +174,11 @@ void SoundTrackAudioNode::requestLoad(const std::string& path)
 
         if (path.empty()) {
             loader->publish(nullptr);
+            loader->loading = false;
             return;
         }
+
+        loader->loading = true;
     }
 
     std::thread([loader, path]() {
@@ -184,8 +187,14 @@ void SoundTrackAudioNode::requestLoad(const std::string& path)
         std::lock_guard lock(loader->mutex);
         if (loader->requestedPath == path) { // not superseded by another request in the meantime
             loader->publish(data);
+            loader->loading = false;
         }
     }).detach();
+}
+
+bool SoundTrackAudioNode::isLoading() const
+{
+    return m_loader->loading.load();
 }
 
 void SoundTrackAudioNode::Loader::publish(const std::shared_ptr<const Data>& data)
@@ -207,6 +216,12 @@ void SoundTrackAudioNode::Loader::publish(const std::shared_ptr<const Data>& dat
 void SoundTrackAudioNode::setPlayheadPosition(const PlayheadPositionPtr& playheadPosition)
 {
     m_playheadPosition = playheadPosition;
+}
+
+void SoundTrackAudioNode::setForceIncludeInExport(bool force)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+    m_forceIncludeInExport = force;
 }
 
 void SoundTrackAudioNode::seek(const TimePosition& position, const bool)
@@ -357,7 +372,7 @@ void SoundTrackAudioNode::doSelfProcess(float* buffer, samples_t samplesPerChann
         m_wasRendering = false;
     }
 
-    if ((currentMode == ProcessMode::PlayingOffline && !m_includeInExport)
+    if ((currentMode == ProcessMode::PlayingOffline && !m_includeInExport && !m_forceIncludeInExport)
         || !data || data->frames <= 0 || outRate == 0 || outChannels == 0) {
         m_wasRendering = false;
         m_lastStartSample = startSample;

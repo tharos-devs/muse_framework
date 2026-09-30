@@ -30,6 +30,8 @@ target_sources(muse_media PRIVATE
     ivideoencoderresolver.h
     ivideodecoder.h
     ivideodecoderfactory.h
+    ivideoremuxer.h
+    ivideotranscoder.h
 
     internal/mediaconfiguration.cpp
     internal/videoencoderresolver.cpp
@@ -43,6 +45,10 @@ target_sources(muse_media PRIVATE
     internal/videodecoderfactory.h
     internal/ffmpeg/videodecoderdecl.inc
     internal/ffmpeg/videodecoderimpl.inc
+    internal/ffmpeg/videoremuxerdecl.inc
+    internal/ffmpeg/videoremuxerimpl.inc
+    internal/ffmpeg/videotranscoderdecl.inc
+    internal/ffmpeg/videotranscoderimpl.inc
 
     internal/ffmpeg/v8/ffmpeglibhandler.cpp
     internal/ffmpeg/v8/ffmpeglibhandler.h
@@ -50,6 +56,10 @@ target_sources(muse_media PRIVATE
     internal/ffmpeg/v8/videoencoder.h
     internal/ffmpeg/v8/videodecoder.cpp
     internal/ffmpeg/v8/videodecoder.h
+    internal/ffmpeg/v8/videoremuxer.cpp
+    internal/ffmpeg/v8/videoremuxer.h
+    internal/ffmpeg/v8/videotranscoder.cpp
+    internal/ffmpeg/v8/videotranscoder.h
 
     internal/ffmpeg/v7/ffmpeglibhandler.cpp
     internal/ffmpeg/v7/ffmpeglibhandler.h
@@ -57,6 +67,10 @@ target_sources(muse_media PRIVATE
     internal/ffmpeg/v7/videoencoder.h
     internal/ffmpeg/v7/videodecoder.cpp
     internal/ffmpeg/v7/videodecoder.h
+    internal/ffmpeg/v7/videoremuxer.cpp
+    internal/ffmpeg/v7/videoremuxer.h
+    internal/ffmpeg/v7/videotranscoder.cpp
+    internal/ffmpeg/v7/videotranscoder.h
 
     internal/ffmpeg/v6/ffmpeglibhandler.cpp
     internal/ffmpeg/v6/ffmpeglibhandler.h
@@ -64,6 +78,10 @@ target_sources(muse_media PRIVATE
     internal/ffmpeg/v6/videoencoder.h
     internal/ffmpeg/v6/videodecoder.cpp
     internal/ffmpeg/v6/videodecoder.h
+    internal/ffmpeg/v6/videoremuxer.cpp
+    internal/ffmpeg/v6/videoremuxer.h
+    internal/ffmpeg/v6/videotranscoder.cpp
+    internal/ffmpeg/v6/videotranscoder.h
 
     internal/ffmpeg/v5/ffmpeglibhandler.cpp
     internal/ffmpeg/v5/ffmpeglibhandler.h
@@ -71,6 +89,10 @@ target_sources(muse_media PRIVATE
     internal/ffmpeg/v5/videoencoder.h
     internal/ffmpeg/v5/videodecoder.cpp
     internal/ffmpeg/v5/videodecoder.h
+    internal/ffmpeg/v5/videoremuxer.cpp
+    internal/ffmpeg/v5/videoremuxer.h
+    internal/ffmpeg/v5/videotranscoder.cpp
+    internal/ffmpeg/v5/videotranscoder.h
 
     internal/ffmpeg/v4/ffmpeglibhandler.cpp
     internal/ffmpeg/v4/ffmpeglibhandler.h
@@ -78,12 +100,18 @@ target_sources(muse_media PRIVATE
     internal/ffmpeg/v4/videoencoder.h
     internal/ffmpeg/v4/videodecoder.cpp
     internal/ffmpeg/v4/videodecoder.h
+    internal/ffmpeg/v4/videoremuxer.cpp
+    internal/ffmpeg/v4/videoremuxer.h
+    internal/ffmpeg/v4/videotranscoder.cpp
+    internal/ffmpeg/v4/videotranscoder.h
 )
 
 set_source_files_properties(
     internal/ffmpeg/v8/ffmpeglibhandler.cpp
     internal/ffmpeg/v8/videoencoder.cpp
     internal/ffmpeg/v8/videodecoder.cpp
+    internal/ffmpeg/v8/videoremuxer.cpp
+    internal/ffmpeg/v8/videotranscoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v8"
 )
 
@@ -91,6 +119,8 @@ set_source_files_properties(
     internal/ffmpeg/v7/ffmpeglibhandler.cpp
     internal/ffmpeg/v7/videoencoder.cpp
     internal/ffmpeg/v7/videodecoder.cpp
+    internal/ffmpeg/v7/videoremuxer.cpp
+    internal/ffmpeg/v7/videotranscoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v7"
 )
 
@@ -98,6 +128,8 @@ set_source_files_properties(
     internal/ffmpeg/v6/ffmpeglibhandler.cpp
     internal/ffmpeg/v6/videoencoder.cpp
     internal/ffmpeg/v6/videodecoder.cpp
+    internal/ffmpeg/v6/videoremuxer.cpp
+    internal/ffmpeg/v6/videotranscoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v6"
 )
 
@@ -105,6 +137,8 @@ set_source_files_properties(
     internal/ffmpeg/v5/ffmpeglibhandler.cpp
     internal/ffmpeg/v5/videoencoder.cpp
     internal/ffmpeg/v5/videodecoder.cpp
+    internal/ffmpeg/v5/videoremuxer.cpp
+    internal/ffmpeg/v5/videotranscoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v5"
 )
 
@@ -112,5 +146,7 @@ set_source_files_properties(
     internal/ffmpeg/v4/ffmpeglibhandler.cpp
     internal/ffmpeg/v4/videoencoder.cpp
     internal/ffmpeg/v4/videodecoder.cpp
+    internal/ffmpeg/v4/videoremuxer.cpp
+    internal/ffmpeg/v4/videotranscoder.cpp
     PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ffmpeg/v4"
 )

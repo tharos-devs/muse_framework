@@ -20,23 +20,23 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#pragma once
+//! NOTE Included inside each muse::media::ffmpeg::vN namespace (see vN/videotranscoder.h), like the decoder
 
-#include "modularity/ioc.h"
+class FFmpegLibHandler;
 
-#include "../ivideodecoderfactory.h"
-#include "../imediaconfiguration.h"
-
-namespace muse::media {
-class VideoDecoderFactory : public IVideoDecoderFactory
+class VideoTranscoder : public IVideoTranscoder
 {
-    GlobalInject<IMediaConfiguration> configuration;
-
 public:
-    io::paths_t defaultFFmpegLibsDirs() const override;
+    bool load(const FFmpegLibPaths& paths);
 
-    IVideoDecoderPtr createDecoder(const io::paths_t& ffmpegLibsDirs) const override;
-    IVideoRemuxerPtr createRemuxer(const io::paths_t& ffmpegLibsDirs) const override;
-    IVideoTranscoderPtr createTranscoder(const io::paths_t& ffmpegLibsDirs) const override;
+    Ret transcodeWithLeadIn(const io::path_t& videoSource, const io::path_t& destination, const Options& options) override;
+
+private:
+    FFmpegLibPaths m_paths;
+    std::shared_ptr<FFmpegLibHandler> m_ff;
+
+    //! NOTE The first H.264 encoder that really opens (see load()), and the pixel format it takes. Opaque here (an
+    //! AVCodec* and an AVPixelFormat), this header being included where the FFmpeg headers aren't available
+    const void* m_encoder = nullptr;
+    int m_pixelFormat = 0;
 };
-}

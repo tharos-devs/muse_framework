@@ -22,35 +22,50 @@
 
 #include "videodecoderfactory.h"
 
+#include <QCoreApplication>
 #include <QFileInfo>
+#include <QLibraryInfo>
 
 #include "io/fileinfo.h"
 
 #include "ffmpegutils.h"
 
 #include "internal/ffmpeg/v8/videodecoder.h"
+#include "internal/ffmpeg/v8/videoremuxer.h"
+#include "internal/ffmpeg/v8/videotranscoder.h"
 #include "internal/ffmpeg/v7/videodecoder.h"
+#include "internal/ffmpeg/v7/videoremuxer.h"
+#include "internal/ffmpeg/v7/videotranscoder.h"
 #include "internal/ffmpeg/v6/videodecoder.h"
+#include "internal/ffmpeg/v6/videoremuxer.h"
+#include "internal/ffmpeg/v6/videotranscoder.h"
 #include "internal/ffmpeg/v5/videodecoder.h"
+#include "internal/ffmpeg/v5/videoremuxer.h"
+#include "internal/ffmpeg/v5/videotranscoder.h"
 #include "internal/ffmpeg/v4/videodecoder.h"
+#include "internal/ffmpeg/v4/videoremuxer.h"
+#include "internal/ffmpeg/v4/videotranscoder.h"
 
 #include "log.h"
 
+using namespace muse;
 using namespace muse::media;
 
 namespace {
-template<typename Decoder>
-IVideoDecoderPtr tryCreateDecoder(const FFmpegLibPaths& paths)
+template<typename T>
+std::shared_ptr<T> tryLoad(const FFmpegLibPaths& paths)
 {
-    auto decoder = std::make_shared<Decoder>();
-    if (decoder->load(paths)) {
-        return decoder;
+    auto object = std::make_shared<T>();
+    if (object->load(paths)) {
+        return object;
     }
     return nullptr;
 }
-}
 
-IVideoDecoderPtr VideoDecoderFactory::createDecoder(const io::paths_t& ffmpegLibsDirs) const
+//! NOTE Calls `make(version, paths)` with the libraries of the first directory really containing a
+//! supported FFmpeg, until it returns something
+template<typename Ptr, typename Make>
+Ptr createFromDirs(const io::paths_t& ffmpegLibsDirs, const Make& make)
 {
     for (const io::path_t& dir : ffmpegLibsDirs) {
         if (dir.empty() || !io::FileInfo::exists(dir)) {
@@ -66,27 +81,80 @@ IVideoDecoderPtr VideoDecoderFactory::createDecoder(const io::paths_t& ffmpegLib
             continue;
         }
 
-        IVideoDecoderPtr decoder;
-        switch (versionFromAVFormatPath(paths.avFormatPath)) {
-        case FFMPEG_V8: decoder = tryCreateDecoder<ffmpeg::v8::VideoDecoder>(paths);
-            break;
-        case FFMPEG_V7: decoder = tryCreateDecoder<ffmpeg::v7::VideoDecoder>(paths);
-            break;
-        case FFMPEG_V6: decoder = tryCreateDecoder<ffmpeg::v6::VideoDecoder>(paths);
-            break;
-        case FFMPEG_V5: decoder = tryCreateDecoder<ffmpeg::v5::VideoDecoder>(paths);
-            break;
-        case FFMPEG_V4: decoder = tryCreateDecoder<ffmpeg::v4::VideoDecoder>(paths);
-            break;
-        default:
-            break;
-        }
-
-        if (decoder) {
-            LOGI() << "video decoder: using the FFmpeg libraries in " << dir;
-            return decoder;
+        if (Ptr result = make(versionFromAVFormatPath(paths.avFormatPath), paths)) {
+            LOGI() << "using the FFmpeg libraries in " << dir;
+            return result;
         }
     }
 
     return nullptr;
+}
+}
+
+io::paths_t VideoDecoderFactory::defaultFFmpegLibsDirs() const
+{
+    io::paths_t dirs;
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+
+    //! NOTE Where the deployment tools put the FFmpeg libraries of Qt Multimedia's FFmpeg backend:
+    //! next to the executable on Windows (windeployqt), in the bundle's Frameworks on macOS (macdeployqt)
+#if defined(Q_OS_MAC)
+    dirs.push_back(io::path_t(appDir + "/../Frameworks"));
+#endif
+    dirs.push_back(io::path_t(appDir));
+
+    //! NOTE Development builds use Qt's own installation directly
+    dirs.push_back(io::path_t(QLibraryInfo::path(QLibraryInfo::LibrariesPath)));
+    dirs.push_back(io::path_t(QLibraryInfo::path(QLibraryInfo::BinariesPath)));
+
+    //! NOTE Last resort: the FFmpeg the user configured for video export
+    if (configuration()) {
+        dirs.push_back(configuration()->ffmpegLibsDir());
+    }
+
+    return dirs;
+}
+
+IVideoDecoderPtr VideoDecoderFactory::createDecoder(const io::paths_t& ffmpegLibsDirs) const
+{
+    return createFromDirs<IVideoDecoderPtr>(ffmpegLibsDirs, [](FFmpegVersion version, const FFmpegLibPaths& paths) -> IVideoDecoderPtr {
+        switch (version) {
+            case FFMPEG_V8: return tryLoad<ffmpeg::v8::VideoDecoder>(paths);
+            case FFMPEG_V7: return tryLoad<ffmpeg::v7::VideoDecoder>(paths);
+            case FFMPEG_V6: return tryLoad<ffmpeg::v6::VideoDecoder>(paths);
+            case FFMPEG_V5: return tryLoad<ffmpeg::v5::VideoDecoder>(paths);
+            case FFMPEG_V4: return tryLoad<ffmpeg::v4::VideoDecoder>(paths);
+            default: return nullptr;
+        }
+    });
+}
+
+IVideoRemuxerPtr VideoDecoderFactory::createRemuxer(const io::paths_t& ffmpegLibsDirs) const
+{
+    return createFromDirs<IVideoRemuxerPtr>(ffmpegLibsDirs, [](FFmpegVersion version, const FFmpegLibPaths& paths) -> IVideoRemuxerPtr {
+        switch (version) {
+            case FFMPEG_V8: return tryLoad<ffmpeg::v8::VideoRemuxer>(paths);
+            case FFMPEG_V7: return tryLoad<ffmpeg::v7::VideoRemuxer>(paths);
+            case FFMPEG_V6: return tryLoad<ffmpeg::v6::VideoRemuxer>(paths);
+            case FFMPEG_V5: return tryLoad<ffmpeg::v5::VideoRemuxer>(paths);
+            case FFMPEG_V4: return tryLoad<ffmpeg::v4::VideoRemuxer>(paths);
+            default: return nullptr;
+        }
+    });
+}
+
+IVideoTranscoderPtr VideoDecoderFactory::createTranscoder(const io::paths_t& ffmpegLibsDirs) const
+{
+    return createFromDirs<IVideoTranscoderPtr>(ffmpegLibsDirs, [](FFmpegVersion version, const FFmpegLibPaths& paths) -> IVideoTranscoderPtr {
+        switch (version) {
+            case FFMPEG_V8: return tryLoad<ffmpeg::v8::VideoTranscoder>(
+                    paths);
+            case FFMPEG_V7: return tryLoad<ffmpeg::v7::VideoTranscoder>(paths);
+            case FFMPEG_V6: return tryLoad<ffmpeg::v6::VideoTranscoder>(paths);
+            case FFMPEG_V5: return tryLoad<ffmpeg::v5::VideoTranscoder>(paths);
+            case FFMPEG_V4: return tryLoad<ffmpeg::v4::VideoTranscoder>(paths);
+            default: return nullptr;
+        }
+    });
 }

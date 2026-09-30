@@ -335,13 +335,15 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::AudioSampleFo
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::SoundTrackFormat& value)
 {
     p.process(value.type, value.outputSpec, value.sampleFormat, value.bitRate,
-              value.leadingSilenceDuration, value.trailingSilenceDuration);
+              value.leadingSilenceDuration, value.trailingSilenceDuration,
+              value.duration, value.includeSoundTracks);
 }
 
 inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::SoundTrackFormat& value)
 {
     p.process(value.type, value.outputSpec, value.sampleFormat, value.bitRate,
-              value.leadingSilenceDuration, value.trailingSilenceDuration);
+              value.leadingSilenceDuration, value.trailingSilenceDuration,
+              value.duration, value.includeSoundTracks);
 }
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::SaveSoundTrackStage& value)

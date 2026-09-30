@@ -20,23 +20,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#pragma once
+//! NOTE Included inside each muse::media::ffmpeg::vN namespace (see vN/videoremuxer.h), like the decoder
 
-#include "modularity/ioc.h"
+class FFmpegLibHandler;
 
-#include "../ivideodecoderfactory.h"
-#include "../imediaconfiguration.h"
-
-namespace muse::media {
-class VideoDecoderFactory : public IVideoDecoderFactory
+class VideoRemuxer : public IVideoRemuxer
 {
-    GlobalInject<IMediaConfiguration> configuration;
-
 public:
-    io::paths_t defaultFFmpegLibsDirs() const override;
+    bool load(const FFmpegLibPaths& paths);
 
-    IVideoDecoderPtr createDecoder(const io::paths_t& ffmpegLibsDirs) const override;
-    IVideoRemuxerPtr createRemuxer(const io::paths_t& ffmpegLibsDirs) const override;
-    IVideoTranscoderPtr createTranscoder(const io::paths_t& ffmpegLibsDirs) const override;
+    Ret remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination,
+              const Options& options) override;
+
+private:
+    std::shared_ptr<FFmpegLibHandler> m_ff;
 };
-}

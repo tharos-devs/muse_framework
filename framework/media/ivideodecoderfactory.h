@@ -26,6 +26,8 @@
 #include "modularity/imoduleinterface.h"
 
 #include "ivideodecoder.h"
+#include "ivideoremuxer.h"
+#include "ivideotranscoder.h"
 
 namespace muse::media {
 class IVideoDecoderFactory : MODULE_GLOBAL_INTERFACE
@@ -35,8 +37,16 @@ class IVideoDecoderFactory : MODULE_GLOBAL_INTERFACE
 public:
     virtual ~IVideoDecoderFactory() = default;
 
+    //! NOTE Where to look for FFmpeg libraries, in order: the ones bundled with Qt Multimedia's FFmpeg
+    //! backend (next to the executable on Windows, in the bundle's Frameworks on macOS, Qt's own
+    //! directories in development builds), then the FFmpeg configured for video export
+    virtual io::paths_t defaultFFmpegLibsDirs() const = 0;
+
     //! NOTE Loads the first complete set of supported FFmpeg libraries (v4 to v8) found in the given
     //! directories, in order, independently of the FFmpeg configured for video export. nullptr if none.
     virtual IVideoDecoderPtr createDecoder(const io::paths_t& ffmpegLibsDirs) const = 0;
+    virtual IVideoRemuxerPtr createRemuxer(const io::paths_t& ffmpegLibsDirs) const = 0;
+    //! NOTE nullptr also if the FFmpeg found has no H.264 encoder
+    virtual IVideoTranscoderPtr createTranscoder(const io::paths_t& ffmpegLibsDirs) const = 0;
 };
 }

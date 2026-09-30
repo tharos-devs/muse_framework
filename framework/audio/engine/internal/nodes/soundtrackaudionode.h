@@ -68,6 +68,12 @@ public:
     //! (loops, seeks, count-in, previous playbacks...)
     void setPlayheadPosition(const PlayheadPositionPtr& playheadPosition);
 
+    //! NOTE Export: play even if the track's own export flag is off
+    void setForceIncludeInExport(bool force);
+
+    //! NOTE Whether the requested file is still being loaded (an export must wait for it)
+    bool isLoading() const;
+
 private:
     struct Data {
         std::vector<int16_t> samples; // interleaved
@@ -86,6 +92,7 @@ private:
         //! block, and a replaced Data is only released once no reader may still use it (see publish())
         std::atomic<const Data*> active { nullptr };
         std::atomic<int> readers { 0 };
+        std::atomic<bool> loading { false };
 
         void publish(const std::shared_ptr<const Data>& data);
     };
@@ -110,6 +117,7 @@ private:
 
     int64_t m_offsetMs = 0;
     bool m_includeInExport = false;
+    bool m_forceIncludeInExport = false;
 
     PlayheadPositionPtr m_playheadPosition;
 

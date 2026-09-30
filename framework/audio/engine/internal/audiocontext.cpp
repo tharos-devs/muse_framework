@@ -21,6 +21,9 @@
  */
 #include "audiocontext.h"
 
+#include <chrono>
+#include <thread>
+
 #include "audio/common/audiosanitizer.h"
 #include "audio/common/audioerrors.h"
 #include "audio/common/audioutils.h"
@@ -982,8 +985,29 @@ Ret AudioContext::doSaveSoundTrack(io::IODevice& dstDevice, const SoundTrackForm
 #ifdef MUSE_MODULE_AUDIO_EXPORT
     using namespace muse::audio::soundtrack;
 
-    const secs_t totalDuration = m_player->duration();
+    //! NOTE Sound track files are loaded in the background: an export right after opening a project (e.g.
+    //! from the command line) could otherwise render before they are, i.e. without them
+    const auto waitStart = std::chrono::steady_clock::now();
+    for (const Track& t : m_tracks) {
+        if (auto soundTrack = std::dynamic_pointer_cast<SoundTrackAudioNode>(t.chain->source())) {
+            while (soundTrack->isLoading() && std::chrono::steady_clock::now() - waitStart < std::chrono::seconds(60)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            if (soundTrack->isLoading()) {
+                LOGW() << "a sound track is still loading, exported without it";
+            }
+        }
+    }
+
+    const secs_t totalDuration = format.duration > 0.0 ? format.duration : m_player->duration();
     auto writer = std::make_shared<SoundTrackWriter>(dstDevice, format, totalDuration, m_mixer);
+
+    std::vector<SoundTrackAudioNodePtr> soundTracks;
+    for (const Track& t : m_tracks) {
+        if (auto soundTrack = std::dynamic_pointer_cast<SoundTrackAudioNode>(t.chain->source())) {
+            soundTracks.push_back(soundTrack);
+        }
+    }
 
     writer->progress().progressChanged().onReceive(this, [this](int64_t current, int64_t total, std::string /*title*/) {
         m_saveSoundTracksProgress.progress.send(current, total, SaveSoundTrackStage::WritingSoundTrack);
@@ -1001,12 +1025,21 @@ Ret AudioContext::doSaveSoundTrack(io::IODevice& dstDevice, const SoundTrackForm
     // Otherwise the real time driver renders the shared graph (mixer, FX) concurrently
     // with the export, which is a data race on shared processors such as the reverb.
     Ret ret;
-    Operation func = [this, writer, &ret]() {
+    Operation func = [this, writer, &ret, &soundTracks, &format]() {
         setMode(ProcessMode::PlayingOffline);
+
+        for (const SoundTrackAudioNodePtr& soundTrack : soundTracks) {
+            soundTrack->setForceIncludeInExport(format.includeSoundTracks);
+        }
+
         ret = writer->write();
         m_mixer->setOutputSpec(outputSpec());
         setMode(ProcessMode::Idle);
         m_player->seek(TimePosition::zero(m_outputSpec.sampleRate));
+
+        for (const SoundTrackAudioNodePtr& soundTrack : soundTracks) {
+            soundTrack->setForceIncludeInExport(false);
+        }
     };
 
     if (m_execOperation) {

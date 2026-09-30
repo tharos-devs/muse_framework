@@ -138,6 +138,11 @@ struct SoundTrackFormat {
     secs_t leadingSilenceDuration = 0.0;
     secs_t trailingSilenceDuration = 0.0;
 
+    //! NOTE How long to render (without the leading/trailing silences); 0: up to the end of the playback
+    secs_t duration = 0.0;
+    //! NOTE Include the sound tracks even if their own export flag is off
+    bool includeSoundTracks = false;
+
     bool operator==(const SoundTrackFormat& other) const
     {
         return type == other.type
@@ -145,7 +150,9 @@ struct SoundTrackFormat {
                && sampleFormat == other.sampleFormat
                && bitRate == other.bitRate
                && leadingSilenceDuration == other.leadingSilenceDuration
-               && trailingSilenceDuration == other.trailingSilenceDuration;
+               && trailingSilenceDuration == other.trailingSilenceDuration
+               && duration == other.duration
+               && includeSoundTracks == other.includeSoundTracks;
     }
 
     bool isValid() const
