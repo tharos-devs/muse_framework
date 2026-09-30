@@ -43,9 +43,19 @@ struct VideoStreamInfo {
 
 //! NOTE A decoded picture, always converted to planar YUV 4:2:0 (8-bit), at the stream's own size
 struct VideoFrame {
+    enum class ColorSpace {
+        Unknown,
+        BT601,
+        BT709,
+        BT2020
+    };
+
     double ptsSecs = 0.0; // from the start of the stream (its first frame is at 0)
     int width = 0;
     int height = 0;
+
+    ColorSpace colorSpace = ColorSpace::Unknown;
+    bool fullRange = false; // 0-255 ("JPEG") instead of the usual 16-235 video range
 
     // Y, then U, then V planes, each with its own stride (U/V are half size, rounded up)
     std::vector<uint8_t> data;

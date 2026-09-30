@@ -99,6 +99,19 @@ struct VideoDecoder::Impl {
         result->width = width;
         result->height = height;
 
+        switch (frame->colorspace) {
+        case AVCOL_SPC_BT709: result->colorSpace = VideoFrame::ColorSpace::BT709;
+            break;
+        case AVCOL_SPC_BT470BG:
+        case AVCOL_SPC_SMPTE170M: result->colorSpace = VideoFrame::ColorSpace::BT601;
+            break;
+        case AVCOL_SPC_BT2020_NCL:
+        case AVCOL_SPC_BT2020_CL: result->colorSpace = VideoFrame::ColorSpace::BT2020;
+            break;
+        default: result->colorSpace = VideoFrame::ColorSpace::Unknown;
+            break;
+        }
+
         const int chromaWidth = (width + 1) / 2;
         const int chromaHeight = (height + 1) / 2;
         result->strides[0] = width;
@@ -119,6 +132,9 @@ struct VideoDecoder::Impl {
 
         const AVPixelFormat srcFormat = static_cast<AVPixelFormat>(frame->format);
         if (srcFormat == AV_PIX_FMT_YUV420P || srcFormat == AV_PIX_FMT_YUVJ420P) {
+            //! NOTE Copied as is, so the range is the source's (a conversion by sws below outputs video range)
+            result->fullRange = srcFormat == AV_PIX_FMT_YUVJ420P || frame->color_range == AVCOL_RANGE_JPEG;
+
             // Already the right layout: plain copy of each plane
             const int planeHeights[3] = { height, chromaHeight, chromaHeight };
             const int planeWidths[3] = { width, chromaWidth, chromaWidth };
@@ -315,8 +331,14 @@ bool VideoDecoder::seek(double secs)
         const double pts = d.framePtsSecs(d.frame);
 
         if (pts <= secs + epsilon) {
-            if (pts >= secs - 1.5 * d.frameDurationSecs) {
-                lastBefore = d.convertFrame(pts);
+            //! NOTE Only the frames that may be the one shown at the target are converted (the others are
+            //! just skipped), including the last frames of the stream, shown for any target past its end
+            const bool nearTarget = pts >= secs - 1.5 * d.frameDurationSecs;
+            const bool nearEnd = d.info.durationSecs > 0.0 && pts >= d.info.durationSecs - 2.0 * d.frameDurationSecs;
+            if (nearTarget || nearEnd) {
+                if (VideoFramePtr converted = d.convertFrame(pts)) {
+                    lastBefore = converted;
+                }
             }
             d.ff->av_frame_unref(d.frame);
             continue;
@@ -353,11 +375,18 @@ VideoFramePtr VideoDecoder::decodeNextFrame()
         return next;
     }
 
-    if (!d.format || !d.codec || !d.receiveFrame()) {
+    if (!d.format || !d.codec) {
         return nullptr;
     }
 
-    VideoFramePtr result = d.convertFrame(d.framePtsSecs(d.frame));
-    d.ff->av_frame_unref(d.frame);
-    return result;
+    //! NOTE A frame that can't be converted is skipped, rather than ending the stream
+    while (d.receiveFrame()) {
+        VideoFramePtr result = d.convertFrame(d.framePtsSecs(d.frame));
+        d.ff->av_frame_unref(d.frame);
+        if (result) {
+            return result;
+        }
+    }
+
+    return nullptr;
 }
