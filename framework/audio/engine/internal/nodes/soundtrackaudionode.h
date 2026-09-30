@@ -81,10 +81,13 @@ private:
         std::mutex mutex;
         std::string requestedPath;
         std::shared_ptr<const Data> current;
-        //! NOTE Kept alive until the next load, so that the audio thread (which reads `active`) never
-        //! holds the last reference to the data it's reading, nor frees it
-        std::shared_ptr<const Data> retired;
+
+        //! NOTE Read by the audio thread without any lock: it counts itself in `readers` for the whole
+        //! block, and a replaced Data is only released once no reader may still use it (see publish())
         std::atomic<const Data*> active { nullptr };
+        std::atomic<int> readers { 0 };
+
+        void publish(const std::shared_ptr<const Data>& data);
     };
 
     static std::shared_ptr<const Data> loadFile(const std::string& path);

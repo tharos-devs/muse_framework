@@ -126,9 +126,16 @@ std::shared_ptr<const SoundTrackAudioNode::Data> SoundTrackAudioNode::loadFile(c
                 return nullptr;
             }
 
+            //! NOTE Never trust the header's size more than the file itself (truncated file)
+            const std::streampos dataStart = file.tellg();
+            file.seekg(0, std::ios::end);
+            const std::streamoff remaining = file.tellg() - dataStart;
+            file.seekg(dataStart);
+            const uint64_t dataBytes = std::min<uint64_t>(chunkSize, remaining > 0 ? static_cast<uint64_t>(remaining) : 0);
+
             auto data = std::make_shared<Data>();
             try {
-                data->samples.resize(chunkSize / sizeof(int16_t));
+                data->samples.resize(static_cast<size_t>(dataBytes / sizeof(int16_t)));
             } catch (const std::bad_alloc&) {
                 LOGE() << "not enough memory to load the sound track: " << path << " (" << chunkSize << " bytes)";
                 return nullptr;
@@ -161,30 +168,40 @@ void SoundTrackAudioNode::requestLoad(const std::string& path)
 
     std::shared_ptr<Loader> loader = m_loader;
 
-    auto publish = [loader](const std::shared_ptr<const Data>& data) {
-        loader->retired = loader->current;
-        loader->current = data;
-        loader->active.store(data.get(), std::memory_order_release);
-    };
-
     {
         std::lock_guard lock(loader->mutex);
         loader->requestedPath = path;
 
         if (path.empty()) {
-            publish(nullptr);
+            loader->publish(nullptr);
             return;
         }
     }
 
-    std::thread([loader, path, publish]() {
+    std::thread([loader, path]() {
         std::shared_ptr<const Data> data = loadFile(path);
 
         std::lock_guard lock(loader->mutex);
         if (loader->requestedPath == path) { // not superseded by another request in the meantime
-            publish(data);
+            loader->publish(data);
         }
     }).detach();
+}
+
+void SoundTrackAudioNode::Loader::publish(const std::shared_ptr<const Data>& data)
+{
+    // Called with `mutex` locked
+    std::shared_ptr<const Data> previous = current;
+    current = data;
+    active.store(data.get()); // seq_cst, paired with the reader's increment + load (see doSelfProcess())
+
+    //! NOTE A reader that counted itself before the store above may still use the previous data: wait for
+    //! it (at most the end of one audio block). One that counts itself after it reads the new data.
+    while (readers.load() != 0) {
+        std::this_thread::yield();
+    }
+
+    previous.reset();
 }
 
 void SoundTrackAudioNode::setPlayheadPosition(const PlayheadPositionPtr& playheadPosition)
@@ -326,7 +343,15 @@ void SoundTrackAudioNode::doSelfProcess(float* buffer, samples_t samplesPerChann
     }
     m_lastRenderTimeUs = now;
 
-    const Data* data = m_loader->active.load(std::memory_order_acquire);
+    //! NOTE Counted as a reader until the end of the block, so `data` can't be released meanwhile
+    struct ReaderScope {
+        std::atomic<int>& readers;
+        explicit ReaderScope(std::atomic<int>& r)
+            : readers(r) { readers.fetch_add(1); }
+        ~ReaderScope() { readers.fetch_sub(1); }
+    } readerScope(m_loader->readers);
+
+    const Data* data = m_loader->active.load();
     if (data != m_lastData) {
         m_lastData = data;
         m_wasRendering = false;
