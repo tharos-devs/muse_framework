@@ -166,6 +166,8 @@ void VstSynthesiser::setMode(const muse::audio::ProcessMode mode)
     // come out later, together with the next chase's note-on of the same keyswitch
     if (!isActive) {
         m_pendingChaseOffEvents.clear();
+        // A live MIDI CC that arrived after the last block must not come out at the next start, over the chase
+        m_sequencer.clearLiveEvents();
     }
     toggleVolumeGain(isActive);
     m_vstAudioClient->setIsPlaying(isActive);
@@ -222,6 +224,12 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
 
     if (active) {
         applyMidiStateChase(sequences);
+
+        const VstSequencer::EventSequence liveEvents = m_sequencer.takeLiveEvents();
+        if (!liveEvents.empty() && !sequences.empty()) {
+            VstSequencer::EventSequence& firstSequence = sequences.begin()->second;
+            firstSequence.insert(firstSequence.end(), liveEvents.cbegin(), liveEvents.cend());
+        }
     }
 
     samples_t sampleOffset = 0;
