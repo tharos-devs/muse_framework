@@ -30,6 +30,8 @@
 #include "kddockwidgets/src/core/DockWidget.h"
 #include "kddockwidgets/src/core/FloatingWindow.h"
 #include "kddockwidgets/src/core/Group.h"
+#include "kddockwidgets/src/core/Layout.h"
+#include "kddockwidgets/src/core/MainWindow.h"
 #include "kddockwidgets/src/qtquick/views/DockWidget.h"
 #include "kddockwidgets/src/qtquick/views/Group.h"
 #include "kddockwidgets/src/qtquick/views/View.h"
@@ -40,9 +42,13 @@
 #ifdef emit
 #undef emit
 #include "kddockwidgets/src/core/layouting/Item_p.h"
+#include "kddockwidgets/src/core/DockWidget_p.h"
+#include "kddockwidgets/src/core/Position_p.h"
 #define emit
 #else
 #include "kddockwidgets/src/core/layouting/Item_p.h"
+#include "kddockwidgets/src/core/DockWidget_p.h"
+#include "kddockwidgets/src/core/Position_p.h"
 #endif
 
 #include "ui/qml/Muse/Ui/navigationsection.h"
@@ -61,6 +67,11 @@ static bool sizeInRange(const QSize& size, const QSize& min, const QSize& max)
     bool heightInRange = size.height() >= min.height() && size.height() <= max.height();
 
     return widthInRange && heightInRange;
+}
+
+static bool isSecondaryWindow(const KDDockWidgets::Core::MainWindow* mainWindow)
+{
+    return mainWindow && mainWindow->uniqueName() == QLatin1String(SECONDARY_WINDOW_NAME);
 }
 
 static KDDockWidgets::Core::Group* groupForDockWidget(KDDockWidgets::Core::DockWidget* dw)
@@ -242,6 +253,55 @@ bool DockBase::floating() const
     return m_floating;
 }
 
+KDDockWidgets::Core::MainWindow* DockBase::dockedMainWindow() const
+{
+    if (!m_dockWidget) {
+        return nullptr;
+    }
+
+    if (m_dockWidget->isOpen()) {
+        if (KDDockWidgets::Core::MainWindow* mainWindow = m_dockWidget->mainWindow()) {
+            return mainWindow;
+        }
+    }
+
+    //! NOTE: the last placeholder it left in a layout (excluding the floating window it may be in now)
+    const KDDockWidgets::Positions* lastPosition = m_dockWidget->d->lastPosition().get();
+    const KDDockWidgets::Core::Item* lastItem = lastPosition ? lastPosition->lastItem(m_dockWidget) : nullptr;
+    const KDDockWidgets::Core::Layout* layout = lastItem ? KDDockWidgets::Core::Layout::fromLayoutingHost(lastItem->host()) : nullptr;
+
+    return layout ? layout->mainWindow() : nullptr;
+}
+
+bool DockBase::reopensFloating() const
+{
+    if (!m_dockWidget || m_dockWidget->isOpen()) {
+        return false;
+    }
+
+    const KDDockWidgets::Positions* lastPosition = m_dockWidget->d->lastPosition().get();
+    return lastPosition && lastPosition->wasFloating();
+}
+
+bool DockBase::isInSecondaryWindow() const
+{
+    return m_dockWidget && m_dockWidget->isOpen() && isSecondaryWindow(m_dockWidget->mainWindow());
+}
+
+bool DockBase::belongsToSecondaryWindow() const
+{
+    if (!m_dockWidget) {
+        return false;
+    }
+
+    if (m_dockWidget->isOpen()) {
+        return isSecondaryWindow(m_dockWidget->mainWindow());
+    }
+
+    //! NOTE: a closed dock widget reopens where it was last docked, unless it was floating
+    return !reopensFloating() && isSecondaryWindow(dockedMainWindow());
+}
+
 bool DockBase::inited() const
 {
     return m_inited;
@@ -355,6 +415,21 @@ void DockBase::setFloatable(bool floatable)
 
     m_properties.floatable = floatable;
     emit floatableChanged();
+}
+
+bool DockBase::secondaryWindowAllowed() const
+{
+    return m_secondaryWindowAllowed;
+}
+
+void DockBase::setSecondaryWindowAllowed(bool allowed)
+{
+    if (allowed == m_secondaryWindowAllowed) {
+        return;
+    }
+
+    m_secondaryWindowAllowed = allowed;
+    emit secondaryWindowAllowedChanged();
 }
 
 void DockBase::setClosable(bool closable)

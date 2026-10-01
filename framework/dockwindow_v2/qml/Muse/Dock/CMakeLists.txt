@@ -33,6 +33,8 @@ qt_add_qml_module(muse_dockwindow_qml
         DockPage.qml
         DockPanel.qml
         DockPanelTab.qml
+        DockRubberBand.qml
+        DockSecondaryWindow.qml
         DockSeparator.qml
         DockTabBar.qml
         DockTitleBar.qml

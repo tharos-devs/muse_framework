@@ -26,6 +26,7 @@
 #include <QString>
 
 #include "async/channel.h"
+#include "async/notification.h"
 
 class QPoint;
 
@@ -49,6 +50,12 @@ public:
     virtual QQuickItem& asItem() const = 0;
 
     virtual void restoreDefaultLayout() = 0;
+
+    //! The secondary window is an extra top-level window, shown only on pages that support it,
+    //! where the panels allowing it can be docked to build a second workspace (e.g. on another screen)
+    virtual bool isSecondaryWindowOpen() const { return false; }
+    virtual void setSecondaryWindowOpen(bool open) { (void)open; }
+    virtual async::Notification secondaryWindowOpenChanged() const { return async::Notification(); }
 };
 }
 

@@ -38,8 +38,15 @@
 #include "internal/dockbase.h"
 
 Q_MOC_INCLUDE(< QQuickWindow >)
+Q_MOC_INCLUDE(< QQmlComponent >)
+
+class QQmlComponent;
 
 namespace KDDockWidgets::QtQuick {
+class MainWindow;
+}
+
+namespace KDDockWidgets::Core {
 class MainWindow;
 }
 
@@ -60,6 +67,11 @@ class DockWindow : public QQuickItem, public IDockWindow, public muse::Contextab
 
     Q_PROPERTY(QQuickWindow * window READ windowProperty NOTIFY windowPropertyChanged)
 
+    //! A Window (see DockSecondaryWindow.qml) instantiated once, on init(), to back the secondary window
+    Q_PROPERTY(
+        QQmlComponent
+        * secondaryWindowComponent READ secondaryWindowComponent WRITE setSecondaryWindowComponent NOTIFY secondaryWindowComponentChanged)
+
     QML_ELEMENT
 
     ContextInject<ui::IUiState> uiState = { this };
@@ -77,6 +89,9 @@ public:
     QQmlListProperty<muse::dock::DockPageView> pagesProperty();
 
     QQuickWindow* windowProperty() const;
+
+    QQmlComponent* secondaryWindowComponent() const;
+    void setSecondaryWindowComponent(QQmlComponent* component);
 
     /* loadPage() is used internally by the InteractiveProvider. Regular code should call
      * openPage(), to ensure the Interactive's m_openingObject query will be properly set
@@ -101,12 +116,21 @@ public:
 
     void restoreDefaultLayout() override;
 
+    bool isSecondaryWindowOpen() const override;
+    void setSecondaryWindowOpen(bool open) override;
+    async::Notification secondaryWindowOpenChanged() const override;
+
     QList<DockToolBarView*> topLevelToolBars(const DockPageView* page) const;
+
+    //! Whether the main window covers this point and is in front of the secondary window there, as far as
+    //! we can tell: KDDockWidgets can't (except on Windows), and always picks the secondary window
+    bool isMainWindowInFrontAt(const QPoint& globalPos) const;
 
 signals:
     void pageLoaded();
     void currentPageUriChanged(const QString& uri);
     void windowPropertyChanged(QQuickWindow* window);
+    void secondaryWindowComponentChanged();
 
 private slots:
     void onQuit();
@@ -126,12 +150,16 @@ private:
     void loadTopLevelToolBars(const DockPageView* page);
 
     void addDock(DockBase* dock, Location location = Location::Left, const DockBase* relativeTo = nullptr);
+    void addDockToDefaultLocation(DockBase* dock);
+    void ensureHoldersHaveDockedLocation(const DockPageView* page);
     void addPanelAsTab(DockPanelView* panel, DockPanelView* destinationPanel);
     void registerDock(DockBase* dock);
 
     void handleUnknownDock(const DockPageView* page, DockBase* unknownDock);
 
     QByteArray windowState() const;
+    QByteArray splitSecondaryWindowLayout(const QString& stateName, const QByteArray& layout);
+    QByteArray mergeSecondaryWindowLayout(const QString& stateName, const QByteArray& regularLayout) const;
     void saveWindowGeometry();
     void restoreGeometry();
     void savePageState(const QString& pageName);
@@ -147,6 +175,12 @@ private:
 
     void notifyAboutDocksOpenStatus();
 
+    void initSecondaryWindow();
+    void applySecondaryWindowOpen(bool open);
+    bool isSecondaryWindowShown() const;
+    bool isSecondaryMainWindow(const KDDockWidgets::Core::MainWindow* mainWindow) const;
+    void updateSecondaryWindowVisibility(const DockPageView* page);
+
     KDDockWidgets::QtQuick::MainWindow* m_mainWindow = nullptr;
     DockPageView* m_currentPage = nullptr;
     uicomponents::QmlListProperty<DockToolBarView> m_toolBars;
@@ -157,5 +191,13 @@ private:
 
     bool m_hasGeometryBeenRestored = false;
     bool m_reloadCurrentPageAllowed = false;
+
+    QQmlComponent* m_secondaryWindowComponent = nullptr;
+    QQuickWindow* m_secondaryWindow = nullptr;
+    KDDockWidgets::QtQuick::MainWindow* m_secondaryMainWindow = nullptr;
+    bool m_secondaryWindowOpen = false;
+    bool m_updatingSecondaryWindowVisibility = false;
+    bool m_mainWindowActivatedLast = true;
+    async::Notification m_secondaryWindowOpenChanged;
 };
 }

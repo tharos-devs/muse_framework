@@ -34,6 +34,11 @@ constexpr const char* DOCK_PANEL_PROPERTY("dockPanel");
 constexpr const char* TITLEBAR_PROPERTY("titleBar");
 constexpr const char* TOOLBAR_COMPONENT_PROPERTY("toolbarComponent");
 
+//! uniqueName of the KDDockWidgets main window backing DockWindow's secondary window
+constexpr const char* SECONDARY_WINDOW_NAME("secondaryWindow");
+//! Set on the KDDockWidgets main window item of the secondary window
+constexpr const char* SECONDARY_WINDOW_ITEM_PROPERTY("isSecondaryDockWindow");
+
 //! NOTE: need to be synchronized with Window shadow(see DockFloatingWindow margins)
 inline constexpr int DOCK_WINDOW_SHADOW(8);
 

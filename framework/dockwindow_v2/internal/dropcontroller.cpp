@@ -22,6 +22,9 @@
 
 #include "dropcontroller.h"
 
+#include <algorithm>
+#include <array>
+
 #include "../idockwindow.h"
 
 #include "qml/Muse/Dock/dockcentralview.h"
@@ -29,6 +32,7 @@
 #include "qml/Muse/Dock/dockpageview.h"
 #include "qml/Muse/Dock/dockpanelview.h"
 #include "qml/Muse/Dock/docktoolbarview.h"
+#include "qml/Muse/Dock/dockwindow.h"
 
 #include "globaltypes.h"
 
@@ -43,6 +47,9 @@
 #endif
 
 #include "kddockwidgets/src/core/DockWidget.h"
+#include "kddockwidgets/src/core/DropArea.h"
+#include "kddockwidgets/src/core/Group.h"
+#include "kddockwidgets/src/core/MainWindow.h"
 #include "kddockwidgets/src/qtquick/views/DockWidget.h"
 #include "kddockwidgets/src/qtquick/views/View.h"
 
@@ -52,6 +59,11 @@ using KDDropLocation = KDDockWidgets::DropLocation;
 
 namespace muse::dock {
 static constexpr double MAX_DISTANCE_TO_HOLDER = 50;
+
+//! Secondary window: how close to one of its edges the mouse docks along that whole edge
+static constexpr int SECONDARY_WINDOW_OUTER_DROP_DISTANCE = 24;
+//! Secondary window: the share of a hovered panel's width/height, around its center, that tabs into it
+static constexpr double SECONDARY_WINDOW_CENTER_DROP_RATIO = 0.4;
 
 static KDDropLocation dropLocationToKDDockLocation(Location location)
 {
@@ -102,8 +114,8 @@ DropController::DropController(KDDockWidgets::Core::ClassicDropIndicatorOverlay*
                                const modularity::ContextPtr& iocCtx)
     : Contextable(iocCtx)
     , m_classicIndicators(classicIndicators)
+    , m_dropAreaView(parent)
 {
-    Q_UNUSED(parent)
 }
 
 KDDropLocation DropController::hover(KDDockWidgets::Point globalPos)
@@ -111,6 +123,16 @@ KDDropLocation DropController::hover(KDDockWidgets::Point globalPos)
     DockBase* draggedDock = this->draggedDock();
     if (!draggedDock) {
         return KDDockWidgets::DropLocation_None;
+    }
+
+    if (KDDockWidgets::Core::DropArea* dropArea = secondaryWindowDropArea()) {
+        //! NOTE: KDDockWidgets picks the secondary window wherever it's under the mouse, even behind the main window
+        const DockWindow* window = dynamic_cast<const DockWindow*>(dockWindow());
+        if (window && window->isMainWindowInFrontAt(globalPos)) {
+            return KDDropLocation::DropLocation_None;
+        }
+
+        return hoverSecondaryWindow(dropArea, globalPos);
     }
 
     QPoint hoveredLocalPos = dockWindow()->asItem().mapFromGlobal(globalPos).toPoint();
@@ -126,12 +148,124 @@ KDDropLocation DropController::hover(KDDockWidgets::Point globalPos)
         auto* dw = m_currentDropDestination.dock->dockWidget();
         auto* dwView = qobject_cast<KDDockWidgets::QtQuick::DockWidget*>(
             KDDockWidgets::QtQuick::asQQuickItem(dw));
-        if (dwView) {
-            m_classicIndicators->setHoveredGroup(dwView->group());
+        KDDockWidgets::Core::Group* group = dwView ? dwView->group() : nullptr;
+
+        //! NOTE: KDDockWidgets crashes when asked to drop next to a group outside of the hovered drop area
+        //! (e.g. a destination that ended up floating, or in another window)
+        KDDockWidgets::Core::DropArea* dropArea = m_dropAreaView ? m_dropAreaView->asDropAreaController() : nullptr;
+        if (!group || !dropArea || !dropArea->groups().contains(group)) {
+            setCurrentDropDestination(draggedDock, DropDestination());
+            return KDDropLocation::DropLocation_None;
         }
+
+        m_classicIndicators->setHoveredGroup(group);
     }
 
     return dropLocationToKDDockLocation(m_currentDropDestination.dropLocation);
+}
+
+KDDockWidgets::Core::DropArea* DropController::secondaryWindowDropArea() const
+{
+    KDDockWidgets::Core::DropArea* dropArea = m_dropAreaView ? m_dropAreaView->asDropAreaController() : nullptr;
+    if (!dropArea) {
+        return nullptr;
+    }
+
+    const KDDockWidgets::Core::MainWindow* mainWindow = dropArea->mainWindow();
+    if (!mainWindow || mainWindow->uniqueName() != QLatin1String(SECONDARY_WINDOW_NAME)) {
+        return nullptr;
+    }
+
+    return dropArea;
+}
+
+bool DropController::isDraggedWindowAllowedInSecondaryWindow() const
+{
+    auto windowBeingDragged = KDDockWidgets::Core::DragController::instance(iocContext()->id)->windowBeingDragged();
+    const DockPageView* page = currentPage();
+    if (!windowBeingDragged || !page) {
+        return false;
+    }
+
+    const QList<DockBase*> docks = page->allDocks();
+    const auto draggedDockWidgets = windowBeingDragged->dockWidgets();
+
+    for (const KDDockWidgets::Core::DockWidget* dockWidget : draggedDockWidgets) {
+        auto it = std::find_if(docks.cbegin(), docks.cend(), [dockWidget](const DockBase* dock) {
+            return dock->dockWidget() == dockWidget;
+        });
+
+        if (it == docks.cend() || !(*it)->secondaryWindowAllowed()) {
+            return false;
+        }
+    }
+
+    return !draggedDockWidgets.isEmpty();
+}
+
+//! NOTE: unlike in the main window, docks are free to go anywhere in the secondary window:
+//! along one of its edges, next to a panel (on the side of it nearest to the mouse),
+//! or as a tab in it. KDDockWidgets previews the drop there (see DockRubberBand)
+KDDropLocation DropController::hoverSecondaryWindow(KDDockWidgets::Core::DropArea* dropArea, KDDockWidgets::Point globalPos) const
+{
+    if (!isDraggedWindowAllowedInSecondaryWindow()) {
+        return KDDropLocation::DropLocation_None;
+    }
+
+    const KDDockWidgets::Core::View* dropAreaView = dropArea->view();
+    const QPoint localPos = dropAreaView->mapFromGlobal(globalPos);
+    const QSize size = dropAreaView->size();
+
+    if (!QRect(QPoint(0, 0), size).contains(localPos)) {
+        return KDDropLocation::DropLocation_None;
+    }
+
+    //! NOTE: the first dock fills the empty window
+    if (dropArea->visibleCount() == 0) {
+        return KDDropLocation::DropLocation_OutterTop;
+    }
+
+    const std::array<std::pair<int, KDDropLocation>, 4> outerDistances { {
+        { localPos.x(), KDDropLocation::DropLocation_OutterLeft },
+        { size.width() - localPos.x(), KDDropLocation::DropLocation_OutterRight },
+        { localPos.y(), KDDropLocation::DropLocation_OutterTop },
+        { size.height() - localPos.y(), KDDropLocation::DropLocation_OutterBottom },
+    } };
+
+    const auto nearestOuter = std::min_element(outerDistances.cbegin(), outerDistances.cend());
+    if (nearestOuter->first <= SECONDARY_WINDOW_OUTER_DROP_DISTANCE) {
+        return nearestOuter->second;
+    }
+
+    //! NOTE: set by KDDockWidgets' DropArea::hover() before asking us
+    const KDDockWidgets::Core::Group* group = m_classicIndicators->hoveredGroup();
+    if (!group) {
+        return KDDropLocation::DropLocation_None;
+    }
+
+    const QPoint groupPos = group->view()->mapFromGlobal(globalPos);
+    const QSize groupSize = group->view()->size();
+    if (groupSize.isEmpty()) {
+        return KDDropLocation::DropLocation_None;
+    }
+
+    const double relativeX = static_cast<double>(groupPos.x()) / groupSize.width();
+    const double relativeY = static_cast<double>(groupPos.y()) / groupSize.height();
+
+    constexpr double centerStart = (1.0 - SECONDARY_WINDOW_CENTER_DROP_RATIO) / 2;
+    constexpr double centerEnd = 1.0 - centerStart;
+    if (relativeX > centerStart && relativeX < centerEnd && relativeY > centerStart && relativeY < centerEnd) {
+        return KDDropLocation::DropLocation_Center;
+    }
+
+    const std::array<std::pair<double, KDDropLocation>, 4> innerDistances { {
+        { relativeX, KDDropLocation::DropLocation_Left },
+        { 1.0 - relativeX, KDDropLocation::DropLocation_Right },
+        { relativeY, KDDropLocation::DropLocation_Top },
+        { 1.0 - relativeY, KDDropLocation::DropLocation_Bottom },
+    } };
+
+    return std::min_element(innerDistances.cbegin(), innerDistances.cend())->second;
 }
 
 void DropController::setVisible(bool visible)

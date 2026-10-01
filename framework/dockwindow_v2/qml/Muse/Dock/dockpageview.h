@@ -61,6 +61,10 @@ class DockPageView : public QQuickItem, public muse::Contextable
 
     Q_PROPERTY(QVariant tours READ tours WRITE setTours NOTIFY toursChanged)
 
+    //! Whether the window's secondary window can be shown while this page is current
+    Q_PROPERTY(
+        bool secondaryWindowAvailable READ secondaryWindowAvailable WRITE setSecondaryWindowAvailable NOTIFY secondaryWindowAvailableChanged)
+
     QML_ELEMENT
 
     ContextInject<ui::INavigationController> navigationController = { this };
@@ -111,6 +115,9 @@ public:
     QVariant tours() const;
     void setTours(const QVariant& newTours);
 
+    bool secondaryWindowAvailable() const;
+    void setSecondaryWindowAvailable(bool available);
+
 public slots:
     void setUri(const QString& uri);
     void setCentralDock(DockCentralView* central);
@@ -124,6 +131,7 @@ signals:
     void statusBarChanged(DockStatusBar* statusBar);
 
     void toursChanged();
+    void secondaryWindowAvailableChanged();
     void layoutRequested();
 
 private:
@@ -146,5 +154,6 @@ private:
     DockStatusBar* m_statusBar = nullptr;
 
     QVariant m_tours;
+    bool m_secondaryWindowAvailable = false;
 };
 }

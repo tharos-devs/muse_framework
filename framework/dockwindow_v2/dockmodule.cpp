@@ -25,6 +25,8 @@
 #include "rcommand/icommandsregister.h"
 #include "rcommand/icommandsstate.h"
 
+#include "docktypes.h"
+
 #include "internal/dropcontroller.h"
 #include "internal/dockseparator.h"
 #include "internal/docktabbar.h"
@@ -48,19 +50,47 @@
 #include "muse_framework_config.h"
 
 namespace muse::dock {
-class HiddenRubberBand : public KDDockWidgets::QtQuick::View
+//! NOTE: DropController highlights the destination docks of the main window itself, so the
+//! drop preview of KDDockWidgets is only shown in the secondary window, where it does the docking
+class DockRubberBand : public KDDockWidgets::QtQuick::View
 {
 public:
-    explicit HiddenRubberBand(QQuickItem* parent)
+    explicit DockRubberBand(QQuickItem* parent)
         : KDDockWidgets::QtQuick::View(nullptr, KDDockWidgets::Core::ViewType::RubberBand, parent)
     {
         KDDockWidgets::QtQuick::View::setVisible(false);
+        setZ(1000);
     }
 
-    void setVisible(bool) override
+    void setVisible(bool visible) override
     {
-        KDDockWidgets::QtQuick::View::setVisible(false);
+        visible = visible && isInSecondaryWindow();
+
+        if (visible && !m_visualItem) {
+            m_visualItem = createItem(KDDockWidgets::QtQuick::Platform::instance()->qmlEngine(),
+                                      QStringLiteral("qrc:/qt/qml/Muse/Dock/DockRubberBand.qml"));
+            if (m_visualItem) {
+                m_visualItem->setParent(this);
+                m_visualItem->setParentItem(this);
+            }
+        }
+
+        KDDockWidgets::QtQuick::View::setVisible(visible);
     }
+
+private:
+    bool isInSecondaryWindow() const
+    {
+        for (const QQuickItem* item = parentItem(); item; item = item->parentItem()) {
+            if (item->property(SECONDARY_WINDOW_ITEM_PROPERTY).toBool()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    QQuickItem* m_visualItem = nullptr;
 };
 
 class DockWidgetFactory : public KDDockWidgets::QtQuick::ViewFactory
@@ -78,7 +108,7 @@ public:
 
     KDDockWidgets::Core::View* createRubberBand(KDDockWidgets::Core::View* parent) const override
     {
-        return new HiddenRubberBand(KDDockWidgets::QtQuick::asQQuickItem(parent));
+        return new DockRubberBand(KDDockWidgets::QtQuick::asQQuickItem(parent));
     }
 
     KDDockWidgets::Core::View* createSeparator(KDDockWidgets::Core::Separator* controller,

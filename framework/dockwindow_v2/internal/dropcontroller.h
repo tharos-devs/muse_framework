@@ -58,6 +58,10 @@ public:
     void updateIndicatorVisibility() override {}
 
 private:
+    KDDockWidgets::DropLocation hoverSecondaryWindow(KDDockWidgets::Core::DropArea* dropArea, KDDockWidgets::Point globalPos) const;
+    KDDockWidgets::Core::DropArea* secondaryWindowDropArea() const;
+    bool isDraggedWindowAllowedInSecondaryWindow() const;
+
     void endHover();
 
     bool isMouseOverDock(const QPoint& mouseLocalPos, const DockBase* dock) const;
@@ -75,6 +79,7 @@ private:
     DockBase* draggedDock() const;
 
     KDDockWidgets::Core::ClassicDropIndicatorOverlay* m_classicIndicators = nullptr;
+    KDDockWidgets::Core::View* m_dropAreaView = nullptr;
     DropDestination m_currentDropDestination;
 };
 }

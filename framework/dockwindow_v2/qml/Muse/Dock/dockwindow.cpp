@@ -35,9 +35,14 @@
 
 #include "global/async/async.h"
 
+#include <QCryptographicHash>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQuickWindow>
 
 #include "dockcentralview.h"
 #include "dockpageview.h"
@@ -56,6 +61,10 @@ using namespace muse::dock;
 using namespace muse::async;
 
 namespace muse::dock {
+static const QString SECONDARY_WINDOW_OPEN_KEY("dockSecondaryWindowOpen");
+static const QString SECONDARY_WINDOW_LAYOUT_KEY_PREFIX("dockSecondaryWindowLayout/");
+static const QString WINDOW_GEOMETRY_STATE_NAME("@windowGeometry");
+
 static const QList<Location> POSSIBLE_LOCATIONS {
     Location::Left,
     Location::Right,
@@ -101,6 +110,94 @@ static void clearRegistry(int ctx)
         registry->unregisterGroup(group);
     }
 }
+}
+
+//! NOTE: KDDockWidgets refuses a whole layout naming a main window it doesn't know, and even crashes restoring
+//! a dock position pointing into one - so the layouts saved as the regular window/page states, which builds
+//! without the secondary window may read too, never mention it: its main window, the dock positions in it and
+//! the floating windows parented to it are stripped (the docks it held count as closed there), while the full
+//! layout is kept aside (see splitSecondaryWindowLayout())
+static QByteArray withoutSecondaryWindow(const QByteArray& layout)
+{
+    QJsonParseError error;
+    QJsonDocument document = QJsonDocument::fromJson(layout, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return layout;
+    }
+
+    QJsonObject root = document.object();
+    QJsonArray mainWindows = root.value(QStringLiteral("mainWindows")).toArray();
+
+    qsizetype secondaryIndex = -1;
+    for (qsizetype i = 0; i < mainWindows.size(); ++i) {
+        if (mainWindows.at(i).toObject().value(QStringLiteral("uniqueName")).toString() == QLatin1String(SECONDARY_WINDOW_NAME)) {
+            secondaryIndex = i;
+            break;
+        }
+    }
+
+    if (secondaryIndex < 0) {
+        return layout;
+    }
+
+    QJsonArray closedDocks = root.value(QStringLiteral("closedDockWidgets")).toArray();
+    const QJsonObject frames = mainWindows.at(secondaryIndex).toObject()
+                               .value(QStringLiteral("multiSplitterLayout")).toObject()
+                               .value(QStringLiteral("frames")).toObject();
+    for (const QJsonValue& frame : frames) {
+        for (const QJsonValue& dockName : frame.toObject().value(QStringLiteral("dockWidgets")).toArray()) {
+            if (!closedDocks.contains(dockName)) {
+                closedDocks.append(dockName);
+            }
+        }
+    }
+
+    mainWindows.removeAt(secondaryIndex);
+
+    QJsonArray floatingWindows = root.value(QStringLiteral("floatingWindows")).toArray();
+    for (qsizetype i = 0; i < floatingWindows.size(); ++i) {
+        QJsonObject floatingWindow = floatingWindows.at(i).toObject();
+        const int parentIndex = floatingWindow.value(QStringLiteral("parentIndex")).toInt(-1);
+        if (parentIndex == secondaryIndex) {
+            floatingWindow.insert(QStringLiteral("parentIndex"), 0);
+        } else if (parentIndex > secondaryIndex) {
+            floatingWindow.insert(QStringLiteral("parentIndex"), parentIndex - 1);
+        }
+        floatingWindows.replace(i, floatingWindow);
+    }
+
+    QJsonArray allDocks = root.value(QStringLiteral("allDockWidgets")).toArray();
+    for (qsizetype i = 0; i < allDocks.size(); ++i) {
+        QJsonObject dock = allDocks.at(i).toObject();
+        QJsonObject lastPosition = dock.value(QStringLiteral("lastPosition")).toObject();
+        QJsonArray placeholders;
+
+        for (const QJsonValue& placeholder : lastPosition.value(QStringLiteral("placeholders")).toArray()) {
+            const QJsonObject placeholderObj = placeholder.toObject();
+            const bool isInSecondaryWindow = !placeholderObj.value(QStringLiteral("isFloatingWindow")).toBool()
+                                             && placeholderObj.value(QStringLiteral("mainWindowUniqueName")).toString()
+                                             == QLatin1String(SECONDARY_WINDOW_NAME);
+            if (!isInSecondaryWindow) {
+                placeholders.append(placeholder);
+            }
+        }
+
+        lastPosition.insert(QStringLiteral("placeholders"), placeholders);
+        dock.insert(QStringLiteral("lastPosition"), lastPosition);
+        allDocks.replace(i, dock);
+    }
+
+    root.insert(QStringLiteral("mainWindows"), mainWindows);
+    root.insert(QStringLiteral("floatingWindows"), floatingWindows);
+    root.insert(QStringLiteral("allDockWidgets"), allDocks);
+    root.insert(QStringLiteral("closedDockWidgets"), closedDocks);
+
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+static QString layoutHash(const QByteArray& layout)
+{
+    return QString::fromLatin1(QCryptographicHash::hash(layout, QCryptographicHash::Sha1).toHex());
 }
 
 DockWindow::DockWindow(QQuickItem* parent)
@@ -162,6 +259,11 @@ void DockWindow::onQuit()
     savePageState(m_currentPage->objectName());
     m_reloadCurrentPageAllowed = false;
 
+    //! NOTE: the windows closing on quit isn't the user closing the secondary window
+    if (m_secondaryWindow) {
+        m_secondaryWindow->disconnect(this);
+    }
+
     clearRegistry(iocContext()->id);
 
     saveWindowGeometry();
@@ -187,9 +289,28 @@ QQuickWindow* DockWindow::windowProperty() const
     return window();
 }
 
+QQmlComponent* DockWindow::secondaryWindowComponent() const
+{
+    return m_secondaryWindowComponent;
+}
+
+void DockWindow::setSecondaryWindowComponent(QQmlComponent* component)
+{
+    if (component == m_secondaryWindowComponent) {
+        return;
+    }
+
+    m_secondaryWindowComponent = component;
+    emit secondaryWindowComponentChanged();
+}
+
 void DockWindow::init()
 {
     clearRegistry(iocContext()->id);
+
+    //! NOTE: before any layout gets restored: KDDockWidgets refuses a layout naming an unknown main window
+    initSecondaryWindow();
+
     restoreGeometry();
 
     dockWindowProvider()->init(this);
@@ -266,23 +387,50 @@ void DockWindow::openPage(const QString& uri)
 
 bool DockWindow::isDockOpen(const QString& dockName) const
 {
-    return m_currentPage && m_currentPage->isDockOpen(dockName);
+    if (!m_currentPage) {
+        return false;
+    }
+
+    //! NOTE: a dock left in the hidden secondary window isn't visible to the user
+    const DockBase* dock = m_currentPage->dockByName(dockName);
+    if (dock && dock->isInSecondaryWindow() && !isSecondaryWindowShown()) {
+        return false;
+    }
+
+    return m_currentPage->isDockOpen(dockName);
 }
 
 void DockWindow::toggleDock(const QString& dockName)
 {
-    if (m_currentPage) {
-        m_currentPage->toggleDock(dockName);
-        m_docksOpenStatusChanged.send({ dockName });
-    }
+    setDockOpen(dockName, !isDockOpen(dockName));
 }
 
 void DockWindow::setDockOpen(const QString& dockName, bool open)
 {
-    if (m_currentPage) {
-        m_currentPage->setDockOpen(dockName, open);
-        m_docksOpenStatusChanged.send({ dockName });
+    if (!m_currentPage) {
+        return;
     }
+
+    DockBase* dock = m_currentPage->dockByName(dockName);
+    if (open && dock && dock->belongsToSecondaryWindow()) {
+        //! NOTE: reopen it where it was in the secondary window (rather than tabbing it
+        //! next to a sibling panel of the main window), and make sure that one is shown
+        dock->open();
+        setSecondaryWindowOpen(true);
+    } else {
+        //! NOTE: a panel without a docked location to go back to (e.g. its siblings, which it would
+        //! otherwise be tabbed with, are all in the secondary window) would open floating, with no
+        //! way to dock it back - so it gets its default location first (unless it was floating anyway)
+        DockPanelView* panel = dynamic_cast<DockPanelView*>(dock);
+        if (open && panel && !panel->isOpen() && !panel->reopensFloating() && !panel->dockedMainWindow()
+            && !m_currentPage->findPanelForTab(panel)) {
+            addDockToDefaultLocation(panel);
+        }
+
+        m_currentPage->setDockOpen(dockName, open);
+    }
+
+    m_docksOpenStatusChanged.send({ dockName });
 }
 
 Channel<QStringList> DockWindow::docksOpenStatusChanged() const
@@ -297,9 +445,33 @@ bool DockWindow::isDockFloating(const QString& dockName) const
 
 void DockWindow::toggleDockFloating(const QString& dockName)
 {
-    if (m_currentPage) {
-        m_currentPage->toggleDockFloating(dockName);
+    if (!m_currentPage) {
+        return;
     }
+
+    DockBase* dock = m_currentPage->dockByName(dockName);
+    if (dock && dock->floating()) {
+        const KDDockWidgets::Core::MainWindow* dockedMainWindow = dock->dockedMainWindow();
+
+        //! NOTE: KDDockWidgets can't dock back a floating dock that has no previous docked location
+        if (!dockedMainWindow) {
+            addDockToDefaultLocation(dock);
+            return;
+        }
+
+        //! NOTE: docking it back into the secondary window must show that one, if this page has it
+        if (isSecondaryMainWindow(dockedMainWindow)) {
+            if (m_currentPage->secondaryWindowAvailable()) {
+                m_currentPage->toggleDockFloating(dockName);
+                setSecondaryWindowOpen(true);
+            } else {
+                addDockToDefaultLocation(dock);
+            }
+            return;
+        }
+    }
+
+    m_currentPage->toggleDockFloating(dockName);
 }
 
 DockPageView* DockWindow::currentPage() const
@@ -335,7 +507,156 @@ void DockWindow::restoreDefaultLayout()
     uiState()->setWindowGeometry(QByteArray());
     m_reloadCurrentPageAllowed = true;
 
+    //! NOTE: the default layout has nothing in the secondary window
+    setSecondaryWindowOpen(false);
+
     reloadCurrentPage();
+}
+
+void DockWindow::initSecondaryWindow()
+{
+    if (!m_secondaryWindowComponent || m_secondaryWindow) {
+        return;
+    }
+
+    TRACEFUNC;
+
+    //! NOTE: in its own creation context, which a bound component (pragma ComponentBehavior: Bound) requires
+    //! (create() without a context would use the engine's root context)
+    QObject* object = m_secondaryWindowComponent->create(m_secondaryWindowComponent->creationContext());
+    m_secondaryWindow = qobject_cast<QQuickWindow*>(object);
+    if (!m_secondaryWindow) {
+        LOGE() << "The secondary window component must be a Window: " << m_secondaryWindowComponent->errorString();
+        delete object;
+        return;
+    }
+
+    //! NOTE: owned by us, but still a top-level window (QWindow::setParent() would embed it)
+    static_cast<QObject*>(m_secondaryWindow)->setParent(this);
+
+    QQuickItem* dockArea = m_secondaryWindow->property("dockArea").value<QQuickItem*>();
+    if (!dockArea) {
+        dockArea = m_secondaryWindow->contentItem();
+    }
+
+    m_secondaryMainWindow = new KDDockWidgets::QtQuick::MainWindow(iocContext()->id, SECONDARY_WINDOW_NAME,
+                                                                   KDDockWidgets::MainWindowOption_None,
+                                                                   dockArea);
+    m_secondaryMainWindow->setProperty(SECONDARY_WINDOW_ITEM_PROPERTY, true);
+
+    m_secondaryWindowOpen = uiState()->isVisible(SECONDARY_WINDOW_OPEN_KEY, false);
+
+    //! NOTE: e.g. another workspace was selected, with its own open state for it
+    uiState()->isVisibleChanged(SECONDARY_WINDOW_OPEN_KEY).onNotify(this, [this]() {
+        applySecondaryWindowOpen(uiState()->isVisible(SECONDARY_WINDOW_OPEN_KEY, false));
+    });
+
+    connect(m_secondaryWindow, &QWindow::visibleChanged, this, [this](bool visible) {
+        //! NOTE: hidden by something else than us, i.e. closed by the user
+        if (!visible && !m_updatingSecondaryWindowVisibility) {
+            setSecondaryWindowOpen(false);
+        }
+    });
+
+    connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, [this](QWindow* focusWindow) {
+        if (focusWindow == m_secondaryWindow) {
+            m_mainWindowActivatedLast = false;
+        } else if (focusWindow && focusWindow == window()) {
+            m_mainWindowActivatedLast = true;
+        }
+    });
+}
+
+bool DockWindow::isSecondaryMainWindow(const KDDockWidgets::Core::MainWindow* mainWindow) const
+{
+    return mainWindow && m_secondaryMainWindow && mainWindow == m_secondaryMainWindow->mainWindow();
+}
+
+bool DockWindow::isMainWindowInFrontAt(const QPoint& globalPos) const
+{
+    const QWindow* mainWindow = window();
+    return m_mainWindowActivatedLast && mainWindow && mainWindow->isVisible() && mainWindow->geometry().contains(globalPos);
+}
+
+bool DockWindow::isSecondaryWindowOpen() const
+{
+    return m_secondaryWindowOpen;
+}
+
+void DockWindow::setSecondaryWindowOpen(bool open)
+{
+    if (!m_secondaryWindow) {
+        return;
+    }
+
+    if (open == m_secondaryWindowOpen) {
+        if (open && m_secondaryWindow->isVisible()) {
+            m_secondaryWindow->raise();
+            m_secondaryWindow->requestActivate();
+        }
+        return;
+    }
+
+    uiState()->setIsVisible(SECONDARY_WINDOW_OPEN_KEY, open);
+    applySecondaryWindowOpen(open);
+}
+
+void DockWindow::applySecondaryWindowOpen(bool open)
+{
+    if (open == m_secondaryWindowOpen) {
+        return;
+    }
+
+    m_secondaryWindowOpen = open;
+
+    updateSecondaryWindowVisibility(m_currentPage);
+
+    m_secondaryWindowOpenChanged.notify();
+
+    //! NOTE: whether the docks in it count as open depends on it being shown
+    if (m_currentPage) {
+        notifyAboutDocksOpenStatus();
+    }
+}
+
+async::Notification DockWindow::secondaryWindowOpenChanged() const
+{
+    return m_secondaryWindowOpenChanged;
+}
+
+bool DockWindow::isSecondaryWindowShown() const
+{
+    return m_secondaryWindow && m_secondaryWindow->isVisible();
+}
+
+void DockWindow::updateSecondaryWindowVisibility(const DockPageView* page)
+{
+    if (!m_secondaryWindow) {
+        return;
+    }
+
+    const bool shown = m_secondaryWindowOpen && page && page->secondaryWindowAvailable();
+
+    //! NOTE: KDDockWidgets hides a window's root view (here, the main window holding the docks) along with
+    //! the window itself, when restoring it hidden (see withValidNormalGeometries()), but never shows it again
+    if (shown) {
+        m_secondaryMainWindow->setVisible(true);
+    }
+
+    if (shown == m_secondaryWindow->isVisible()) {
+        return;
+    }
+
+    m_updatingSecondaryWindowVisibility = true;
+
+    //! NOTE: setVisible() (unlike show()) keeps the window state, e.g. maximized
+    m_secondaryWindow->setVisible(shown);
+
+    if (shown) {
+        m_secondaryWindow->raise();
+    }
+
+    m_updatingSecondaryWindowVisibility = false;
 }
 
 void DockWindow::loadPageContent(const DockPageView* page)
@@ -430,6 +751,46 @@ void DockWindow::addDock(DockBase* dock, Location location, const DockBase* rela
     m_mainWindow->addDockWidget(dockWidgetView, locationToKLocation(location), relativeDockWidgetView, options);
 }
 
+//! NOTE: docks it (hidden, if it's closed) in the main window, where loadPageContent() puts it by default
+void DockWindow::addDockToDefaultLocation(DockBase* dock)
+{
+    const Location location = dock->location();
+    const bool isSideLocation = location == Location::Left || location == Location::Right;
+    const bool isPanel = dock->type() == DockType::Panel;
+
+    registerDock(dock);
+
+    auto* dockWidgetView = qobject_cast<KDDockWidgets::QtQuick::DockWidget*>(
+        KDDockWidgets::QtQuick::asQQuickItem(dock->dockWidget()));
+
+    KDDockWidgets::QtQuick::DockWidget* relativeDockWidgetView = nullptr;
+    if (isPanel && isSideLocation && m_currentPage && m_currentPage->centralDock()) {
+        relativeDockWidgetView = qobject_cast<KDDockWidgets::QtQuick::DockWidget*>(
+            KDDockWidgets::QtQuick::asQQuickItem(m_currentPage->centralDock()->dockWidget()));
+    }
+
+    auto visibilityOption = dock->isOpen() ? KDDockWidgets::InitialVisibilityOption::StartVisible
+                            : KDDockWidgets::InitialVisibilityOption::StartHidden;
+
+    m_mainWindow->addDockWidget(dockWidgetView, locationToKLocation(location), relativeDockWidgetView,
+                                KDDockWidgets::InitialOption(visibilityOption, dock->preferredSize()));
+}
+
+//! NOTE: DropController opens the holders to dock into them: one with no docked location would open floating
+//! (KDDockWidgets then refusing, or even crashing on, a drop next to it in the main window). A saved layout
+//! where they're all closed doesn't keep one, so they get their default one back
+void DockWindow::ensureHoldersHaveDockedLocation(const DockPageView* page)
+{
+    for (DockType type : { DockType::Panel, DockType::ToolBar }) {
+        for (Location location : POSSIBLE_LOCATIONS) {
+            DockingHolderView* holder = page->holder(type, location);
+            if (holder && !holder->isOpen() && holder->dockedMainWindow() != m_mainWindow->mainWindow()) {
+                addDock(holder, location);
+            }
+        }
+    }
+}
+
 void DockWindow::addPanelAsTab(DockPanelView* panel, DockPanelView* destinationPanel)
 {
     registerDock(panel);
@@ -515,8 +876,12 @@ bool DockWindow::doLoadPage(const QString& uri, const QVariantMap& params)
 
     newPage->setVisible(true);
 
+    //! NOTE: shown before its docks get restored into it, so that its layout gets its actual size
+    updateSecondaryWindowVisibility(newPage);
+
     loadPageContent(newPage);
     restorePageState(newPage);
+    ensureHoldersHaveDockedLocation(newPage);
     initDocks(newPage);
 
     newPage->setParams(params);
@@ -529,23 +894,65 @@ bool DockWindow::doLoadPage(const QString& uri, const QVariantMap& params)
     return true;
 }
 
+//! NOTE: returns the layout to save as the regular state, keeping the full one (see withoutSecondaryWindow())
+//! aside with the hash of that regular one: it's only used again while the regular state is still that one,
+//! i.e. as long as no build without the secondary window has saved its own layout in the meantime
+QByteArray DockWindow::splitSecondaryWindowLayout(const QString& stateName, const QByteArray& layout)
+{
+    if (!m_secondaryMainWindow) {
+        return layout;
+    }
+
+    const QByteArray regularLayout = withoutSecondaryWindow(layout);
+
+    QString fullLayout;
+    if (regularLayout != layout) {
+        fullLayout = layoutHash(regularLayout) + u'\n' + QString::fromLatin1(layout.toBase64());
+    }
+
+    const QString key = SECONDARY_WINDOW_LAYOUT_KEY_PREFIX + stateName;
+    if (uiState()->uiItemState(key) != fullLayout) {
+        uiState()->setUiItemState(key, fullLayout);
+    }
+
+    return regularLayout;
+}
+
+QByteArray DockWindow::mergeSecondaryWindowLayout(const QString& stateName, const QByteArray& regularLayout) const
+{
+    //! NOTE: KDDockWidgets would refuse the whole layout naming a main window it doesn't know
+    if (!m_secondaryMainWindow) {
+        return regularLayout;
+    }
+
+    const QString fullLayout = uiState()->uiItemState(SECONDARY_WINDOW_LAYOUT_KEY_PREFIX + stateName);
+
+    const qsizetype separatorIndex = fullLayout.indexOf(u'\n');
+    if (separatorIndex < 0 || QStringView(fullLayout).left(separatorIndex) != layoutHash(regularLayout)) {
+        return regularLayout;
+    }
+
+    return QByteArray::fromBase64(QStringView(fullLayout).mid(separatorIndex + 1).toLatin1());
+}
+
 void DockWindow::saveWindowGeometry()
 {
     /// NOTE: The state of all dock widgets is also saved here,
     /// since the library does not provide the ability to save
     /// and restore only the application geometry.
-    uiState()->setWindowGeometry(windowState());
+    uiState()->setWindowGeometry(splitSecondaryWindowLayout(WINDOW_GEOMETRY_STATE_NAME, windowState()));
 }
 
 void DockWindow::restoreGeometry()
 {
     TRACEFUNC;
 
-    if (uiState()->windowGeometry().isEmpty()) {
+    const QByteArray layout = mergeSecondaryWindowLayout(WINDOW_GEOMETRY_STATE_NAME, uiState()->windowGeometry());
+    if (layout.isEmpty()) {
         return;
     }
 
-    if (restoreLayout(uiState()->windowGeometry())) {
+    if (restoreLayout(layout)) {
         m_hasGeometryBeenRestored = true;
     } else {
         LOGE() << "Could not restore the window geometry!";
@@ -557,7 +964,7 @@ void DockWindow::savePageState(const QString& pageName)
     TRACEFUNC;
 
     m_reloadCurrentPageAllowed = false;
-    uiState()->setPageState(pageName, windowState());
+    uiState()->setPageState(pageName, splitSecondaryWindowLayout(pageName, windowState()));
     m_reloadCurrentPageAllowed = true;
 }
 
@@ -568,20 +975,21 @@ void DockWindow::restorePageState(const DockPageView* page)
     const QString& pageName = page->objectName();
 
     ValNt<QByteArray> pageStateValNt = uiState()->pageState(pageName);
-    const bool layoutIsEmpty = pageStateValNt.val.isEmpty();
+    const QByteArray layout = mergeSecondaryWindowLayout(pageName, pageStateValNt.val);
+    const bool layoutIsEmpty = layout.isEmpty();
 
     QSet<DockBase*> unknownDocks;
     if (!layoutIsEmpty) {
         for (DockBase* dock : page->allDocks()) {
             const KDDockWidgets::Core::DockWidget* dockWidget = dock->dockWidget();
-            if (!pageStateValNt.val.contains(dockWidget->uniqueName().toLocal8Bit())) {
+            if (!layout.contains(dockWidget->uniqueName().toLocal8Bit())) {
                 unknownDocks.insert(dock);
             }
         }
     }
 
     /// NOTE: Do not restore geometry
-    bool ok = restoreLayout(pageStateValNt.val, true /*restoreRelativeToMainWindow*/);
+    bool ok = restoreLayout(layout, true /*restoreRelativeToMainWindow*/);
     if (!ok) {
         LOGE() << "Could not restore the state of " << pageName << "!";
     }
@@ -608,6 +1016,8 @@ void DockWindow::restorePageState(const DockPageView* page)
 //! Its maximized geometry is a sane normal geometry to fall back on.
 //! A main window is also never restored minimized (e.g. quit while minimized): it would start hidden in the Dock,
 //! and be saved minimized again
+//! The secondary window is always restored hidden (DockWindow shows it, depending on the current page), and not
+//! in full screen, which would make it take over a whole screen as soon as the app starts
 static QByteArray withValidNormalGeometries(const QByteArray& layout)
 {
     QJsonParseError error;
@@ -626,9 +1036,19 @@ static QByteArray withValidNormalGeometries(const QByteArray& layout)
             QJsonObject window = windows.at(i).toObject();
 
             constexpr int MINIMIZED_STATE_FLAG = 1; // KDDockWidgets::WindowState::Minimized
+            constexpr int FULLSCREEN_STATE_FLAG = 4; // KDDockWidgets::WindowState::FullScreen
             const int windowState = window.value(QStringLiteral("windowState")).toInt();
             if (windowsKey == QStringLiteral("mainWindows") && (windowState & MINIMIZED_STATE_FLAG)) {
                 window.insert(QStringLiteral("windowState"), windowState & ~MINIMIZED_STATE_FLAG);
+                windows.replace(i, window);
+                changed = true;
+            }
+
+            const bool isSecondaryWindow = windowsKey == QStringLiteral("mainWindows")
+                                           && window.value(QStringLiteral("uniqueName")).toString() == QLatin1String(SECONDARY_WINDOW_NAME);
+            if (isSecondaryWindow && (window.value(QStringLiteral("isVisible")).toBool() || (windowState & FULLSCREEN_STATE_FLAG))) {
+                window.insert(QStringLiteral("isVisible"), false);
+                window.insert(QStringLiteral("windowState"), window.value(QStringLiteral("windowState")).toInt() & ~FULLSCREEN_STATE_FLAG);
                 windows.replace(i, window);
                 changed = true;
             }
@@ -686,8 +1106,18 @@ bool DockWindow::restoreLayout(const QByteArray& layout, bool restoreRelativeToM
 
 void DockWindow::syncFloatingLayoutsToViewSize()
 {
+    QList<KDDockWidgets::Core::Layout*> layouts;
+
     for (KDDockWidgets::Core::FloatingWindow* floatingWindow : KDDockWidgets::DockRegistry::self(iocContext()->id)->floatingWindows()) {
-        KDDockWidgets::Core::Layout* floatingLayout = floatingWindow->layout();
+        layouts << floatingWindow->layout();
+    }
+
+    //! NOTE: same for the secondary window, which may have just been shown for the restore
+    if (m_secondaryMainWindow) {
+        layouts << m_secondaryMainWindow->mainWindow()->layout();
+    }
+
+    for (KDDockWidgets::Core::Layout* floatingLayout : layouts) {
         if (!floatingLayout || !floatingLayout->view()) {
             continue;
         }
@@ -741,6 +1171,11 @@ void DockWindow::reloadCurrentPage()
     }
 
     TRACEFUNC;
+
+    //! NOTE: e.g. another workspace was selected, with its own open state for the secondary window
+    if (m_secondaryWindow) {
+        applySecondaryWindowOpen(uiState()->isVisible(SECONDARY_WINDOW_OPEN_KEY, false));
+    }
 
     clearRegistry(iocContext()->id);
 

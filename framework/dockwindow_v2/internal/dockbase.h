@@ -35,6 +35,7 @@ Q_MOC_INCLUDE("ui/qml/Muse/Ui/navigationsection.h")
 
 namespace KDDockWidgets::Core {
 class DockWidget;
+class MainWindow;
 }
 
 namespace muse::ui {
@@ -63,6 +64,8 @@ class DockBase : public QQuickItem, public Contextable
     Q_PROPERTY(bool closable READ closable WRITE setClosable NOTIFY closableChanged)
     Q_PROPERTY(bool resizable READ resizable WRITE setResizable NOTIFY resizableChanged)
     Q_PROPERTY(bool separatorsVisible READ separatorsVisible WRITE setSeparatorsVisible NOTIFY separatorsVisibleChanged)
+    Q_PROPERTY(
+        bool secondaryWindowAllowed READ secondaryWindowAllowed WRITE setSecondaryWindowAllowed NOTIFY secondaryWindowAllowedChanged)
 
     Q_PROPERTY(bool isCompact READ isCompact WRITE setIsCompact NOTIFY isCompactChanged FINAL)
     Q_PROPERTY(int compactPriorityOrder READ compactPriorityOrder WRITE setCompactPriorityOrder NOTIFY compactPriorityOrderChanged FINAL)
@@ -102,6 +105,7 @@ public:
     bool closable() const;
     bool resizable() const;
     bool separatorsVisible() const;
+    bool secondaryWindowAllowed() const;
     bool defaultVisibility() const;
 
     bool isCompact() const;
@@ -109,6 +113,18 @@ public:
     int nonCompactWidth() const;
 
     bool floating() const;
+
+    //! The main window it's docked in, or else where it was last docked (e.g. while closed or floating);
+    //! nullptr if it has never been docked, or has lost its last docked position
+    KDDockWidgets::Core::MainWindow* dockedMainWindow() const;
+
+    //! Closed while it was floating: reopening it makes it float again
+    bool reopensFloating() const;
+
+    //! Docked (and open) in the window's secondary window
+    bool isInSecondaryWindow() const;
+    //! Docked in the secondary window, or closed while it was docked there (reopening it puts it back there)
+    bool belongsToSecondaryWindow() const;
 
     bool inited() const;
 
@@ -151,6 +167,7 @@ public slots:
     void setClosable(bool closable);
     void setResizable(bool resizable);
     void setSeparatorsVisible(bool visible);
+    void setSecondaryWindowAllowed(bool allowed);
 
     void setIsCompact(bool compact);
     void setCompactPriorityOrder(int order);
@@ -174,6 +191,7 @@ signals:
     void closableChanged();
     void resizableChanged();
     void separatorsVisibleChanged();
+    void secondaryWindowAllowedChanged();
 
     void isCompactChanged();
     void compactPriorityOrderChanged();
@@ -233,6 +251,7 @@ private:
     int m_nonCompactWidth = 0;
 
     bool m_floating = false;
+    bool m_secondaryWindowAllowed = false;
 
     bool m_inited = false;
     KDDockWidgets::Core::DockWidget* m_dockWidget = nullptr;
