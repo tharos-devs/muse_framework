@@ -24,6 +24,7 @@
 
 #include "kddockwidgets/src/LayoutSaver.h"
 #include "kddockwidgets/src/core/DockRegistry.h"
+#include "kddockwidgets/src/core/FloatingWindow.h"
 #include "kddockwidgets/src/core/Layout.h"
 #include "kddockwidgets/src/core/MainWindow.h"
 #include "kddockwidgets/src/qtquick/views/MainWindow.h"
@@ -609,7 +610,31 @@ bool DockWindow::restoreLayout(const QByteArray& layout, bool restoreRelativeToM
                   : KDDockWidgets::RestoreOption_None;
 
     KDDockWidgets::LayoutSaver layoutSaver(iocContext()->id, option);
-    return layoutSaver.restoreLayout(layout);
+    bool ok = layoutSaver.restoreLayout(layout);
+
+    //! NOTE: KDDockWidgets' Layout::onResize() ignores every resize while a restore is in progress,
+    //! but a restored floating window's layout view only reaches its real size (the restored window
+    //! geometry, propagated through DockFloatingWindow.qml's anchors) during that same restore - its
+    //! layout would otherwise stay at whatever size its view had when the layout was deserialized,
+    //! leaving the panel stuck smaller than its own window until the user manually resizes it
+    syncFloatingLayoutsToViewSize();
+    muse::async::Async::call(this, [this]() {
+        syncFloatingLayoutsToViewSize();
+    });
+
+    return ok;
+}
+
+void DockWindow::syncFloatingLayoutsToViewSize()
+{
+    for (KDDockWidgets::Core::FloatingWindow* floatingWindow : KDDockWidgets::DockRegistry::self(iocContext()->id)->floatingWindows()) {
+        KDDockWidgets::Core::Layout* floatingLayout = floatingWindow->layout();
+        if (!floatingLayout || !floatingLayout->view()) {
+            continue;
+        }
+
+        floatingLayout->setLayoutSize(floatingLayout->view()->size());
+    }
 }
 
 bool DockWindow::checkLayoutIsCorrupted() const

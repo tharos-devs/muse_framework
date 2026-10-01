@@ -139,6 +139,7 @@ private:
 
     void reloadCurrentPage();
     bool restoreLayout(const QByteArray& layout, bool restoreRelativeToMainWindow = false);
+    void syncFloatingLayoutsToViewSize();
     bool checkLayoutIsCorrupted() const;
     void forceLayout();
 
