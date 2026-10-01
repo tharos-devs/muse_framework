@@ -24,6 +24,7 @@
 
 #include "global/interpolation.h"
 
+#include <algorithm>
 #include <map>
 #include <optional>
 
@@ -88,6 +89,26 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
 
 void VstSequencer::updateOffStreamEvents(const mpe::PlaybackEventsMap& events)
 {
+    if (isActive()) {
+        mpe::PlaybackEventsMap offStreamEvents;
+
+        for (const auto& [timestamp, eventList] : events) {
+            for (const mpe::PlaybackEvent& event : eventList) {
+                const auto* controllerEvent = std::get_if<mpe::ControllerChangeEvent>(&event);
+                if (controllerEvent && controllerEvent->type == mpe::ControllerChangeEvent::ControlChange) {
+                    addLiveControlChange(*controllerEvent);
+                } else {
+                    offStreamEvents[timestamp].push_back(event);
+                }
+            }
+        }
+
+        addPlaybackEvents(m_offStreamEvents, offStreamEvents, false /*recordState*/);
+        addMidiMessagesEvents(m_offStreamEvents, offStreamEvents, false /*recordState*/);
+        updateOffSequenceIterator();
+        return;
+    }
+
     addPlaybackEvents(m_offStreamEvents, events, false /*recordState*/);
     addMidiMessagesEvents(m_offStreamEvents, events, false /*recordState*/);
     updateOffSequenceIterator();
@@ -260,6 +281,33 @@ void VstSequencer::addControlChangeEvent(EventSequenceMap& destination, const mp
     case mpe::ControllerChangeEvent::Undefined:
         break;
     }
+}
+
+void VstSequencer::addLiveControlChange(const mpe::ControllerChangeEvent& event)
+{
+    auto controlIt = m_mapping.find(static_cast<ControlIdx>(event.controller));
+    if (controlIt == m_mapping.cend()) {
+        return;
+    }
+
+    const PluginParamId paramId = controlIt->second;
+    m_liveEvents.emplace_back(ParamChangeEvent { paramId, static_cast<PluginParamValue>(event.val.raw()) });
+
+    // The values still to come from the main stream would immediately undo the live one
+    for (auto it = m_mainStreamEvents.lower_bound(m_playbackPosition); it != m_mainStreamEvents.end(); ++it) {
+        EventSequence& sequence = it->second;
+        sequence.erase(std::remove_if(sequence.begin(), sequence.end(), [paramId](const EventType& e) {
+            const auto* paramChange = std::get_if<ParamChangeEvent>(&e);
+            return paramChange && paramChange->paramId == paramId;
+        }), sequence.end());
+    }
+}
+
+VstSequencer::EventSequence VstSequencer::takeLiveEvents()
+{
+    EventSequence events = std::move(m_liveEvents);
+    m_liveEvents.clear();
+    return events;
 }
 
 void VstSequencer::addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp,

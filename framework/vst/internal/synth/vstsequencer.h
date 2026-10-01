@@ -39,6 +39,11 @@ public:
     //! Keyswitch note-offs are returned separately, so they can be sent a little later than their note-ons
     void midiStateBefore(const audio::msecs_t position, EventSequence& onEvents, EventSequence& offEvents) const;
 
+    //! NOTE: MIDI CCs received live (off-stream) while playing, to send right away - the off stream itself
+    //! is only played when stopped. Each one also overrides its controller's main stream values from there
+    //! on (a CC being recorded replaces the existing curve), until the main stream is updated again
+    EventSequence takeLiveEvents();
+
 private:
     void updateMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics) override;
     void updateOffStreamEvents(const mpe::PlaybackEventsMap& events) override;
@@ -52,6 +57,7 @@ private:
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event,
                                bool recordState);
+    void addLiveControlChange(const mpe::ControllerChangeEvent& event);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                         const PluginParamValue value);
     void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta);
@@ -83,5 +89,7 @@ private:
 
     //! NOTE: MIDI CC automation values sent over time, per controller (main stream only)
     std::map<ControlIdx, std::map<audio::msecs_t, PluginParamValue> > m_controllerStates;
+
+    EventSequence m_liveEvents;
 };
 }

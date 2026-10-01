@@ -222,6 +222,12 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
 
     if (active) {
         applyMidiStateChase(sequences);
+
+        const VstSequencer::EventSequence liveEvents = m_sequencer.takeLiveEvents();
+        if (!liveEvents.empty() && !sequences.empty()) {
+            VstSequencer::EventSequence& firstSequence = sequences.begin()->second;
+            firstSequence.insert(firstSequence.end(), liveEvents.cbegin(), liveEvents.cend());
+        }
     }
 
     samples_t sampleOffset = 0;
