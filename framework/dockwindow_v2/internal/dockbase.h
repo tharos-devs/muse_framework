@@ -35,6 +35,7 @@ Q_MOC_INCLUDE("ui/qml/Muse/Ui/navigationsection.h")
 
 namespace KDDockWidgets::Core {
 class DockWidget;
+class MainWindow;
 }
 
 namespace muse::ui {
@@ -112,6 +113,10 @@ public:
     int nonCompactWidth() const;
 
     bool floating() const;
+
+    //! The main window it's docked in, or else where it was last docked (e.g. while closed or floating);
+    //! nullptr if it has never been docked, or has lost its last docked position
+    KDDockWidgets::Core::MainWindow* dockedMainWindow() const;
 
     //! Docked (and open) in the window's secondary window
     bool isInSecondaryWindow() const;

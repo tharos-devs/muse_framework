@@ -141,9 +141,17 @@ KDDropLocation DropController::hover(KDDockWidgets::Point globalPos)
         auto* dw = m_currentDropDestination.dock->dockWidget();
         auto* dwView = qobject_cast<KDDockWidgets::QtQuick::DockWidget*>(
             KDDockWidgets::QtQuick::asQQuickItem(dw));
-        if (dwView) {
-            m_classicIndicators->setHoveredGroup(dwView->group());
+        KDDockWidgets::Core::Group* group = dwView ? dwView->group() : nullptr;
+
+        //! NOTE: KDDockWidgets crashes when asked to drop next to a group outside of the hovered drop area
+        //! (e.g. a destination that ended up floating, or in another window)
+        KDDockWidgets::Core::DropArea* dropArea = m_dropAreaView ? m_dropAreaView->asDropAreaController() : nullptr;
+        if (!group || !dropArea || !dropArea->groups().contains(group)) {
+            setCurrentDropDestination(draggedDock, DropDestination());
+            return KDDropLocation::DropLocation_None;
         }
+
+        m_classicIndicators->setHoveredGroup(group);
     }
 
     return dropLocationToKDDockLocation(m_currentDropDestination.dropLocation);

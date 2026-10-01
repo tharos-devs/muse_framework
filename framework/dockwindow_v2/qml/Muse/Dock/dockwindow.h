@@ -142,12 +142,16 @@ private:
     void loadTopLevelToolBars(const DockPageView* page);
 
     void addDock(DockBase* dock, Location location = Location::Left, const DockBase* relativeTo = nullptr);
+    void addDockToDefaultLocation(DockBase* dock);
+    void ensureHoldersHaveDockedLocation(const DockPageView* page);
     void addPanelAsTab(DockPanelView* panel, DockPanelView* destinationPanel);
     void registerDock(DockBase* dock);
 
     void handleUnknownDock(const DockPageView* page, DockBase* unknownDock);
 
     QByteArray windowState() const;
+    QByteArray splitSecondaryWindowLayout(const QString& stateName, const QByteArray& layout);
+    QByteArray mergeSecondaryWindowLayout(const QString& stateName, const QByteArray& regularLayout) const;
     void saveWindowGeometry();
     void restoreGeometry();
     void savePageState(const QString& pageName);
