@@ -605,7 +605,9 @@ void DockWindow::restorePageState(const DockPageView* page)
 //! NOTE: KDDockWidgets (QtQuick) only records a window's normal geometry while it's in the normal state, so a
 //! window that stayed maximized for a whole session is saved with an empty one - restoring it then sets that
 //! empty geometry before maximizing it again, which leaves the window shrunk to its minimum size on macOS.
-//! Its maximized geometry is a sane normal geometry to fall back on
+//! Its maximized geometry is a sane normal geometry to fall back on.
+//! A main window is also never restored minimized (e.g. quit while minimized): it would start hidden in the Dock,
+//! and be saved minimized again
 static QByteArray withValidNormalGeometries(const QByteArray& layout)
 {
     QJsonParseError error;
@@ -622,6 +624,15 @@ static QByteArray withValidNormalGeometries(const QByteArray& layout)
 
         for (qsizetype i = 0; i < windows.size(); ++i) {
             QJsonObject window = windows.at(i).toObject();
+
+            constexpr int MINIMIZED_STATE_FLAG = 1; // KDDockWidgets::WindowState::Minimized
+            const int windowState = window.value(QStringLiteral("windowState")).toInt();
+            if (windowsKey == QStringLiteral("mainWindows") && (windowState & MINIMIZED_STATE_FLAG)) {
+                window.insert(QStringLiteral("windowState"), windowState & ~MINIMIZED_STATE_FLAG);
+                windows.replace(i, window);
+                changed = true;
+            }
+
             const QJsonObject normalGeometry = window.value(QStringLiteral("normalGeometry")).toObject();
             const QJsonObject geometry = window.value(QStringLiteral("geometry")).toObject();
 
