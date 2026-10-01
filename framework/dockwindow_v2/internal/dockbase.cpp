@@ -469,7 +469,11 @@ void DockBase::setIsCompact(bool compact)
     }
 
     if (compact) {
-        m_nonCompactWidth = width();
+        //! NOTE: the width it needs to be non-compact again: its content may be wider than the dock itself (e.g. right
+        //! after leaving the compact mode, before the dock got resized to it) - remembering only the dock's width
+        //! would let TopLevelToolBarsLayout make it non-compact again where it doesn't fit, and so compact again
+        //! on the next relayout, endlessly (the app froze)
+        m_nonCompactWidth = std::max(static_cast<int>(width()), contentWidth());
     }
 
     m_isCompact = compact;
