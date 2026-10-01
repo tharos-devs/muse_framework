@@ -39,6 +39,7 @@
 
 #include "diagnostics/diagnosticutils.h"
 
+#include "filedialogfilters.h"
 #include "widgetdialogadapter.h"
 #include "ui/view/widgetdialog.h"
 
@@ -318,9 +319,13 @@ static UriQuery makeSelectFileQuery(FileDialogMode mode, const std::string& titl
     UriQuery q("muse://interactive/selectfile");
     q.set("title", title);
 
+    const bool isOpenMode = mode == FileDialogMode::OpenFile || mode == FileDialogMode::OpenFiles;
+    const bool hidesFilterDetails = options & QFileDialog::HideNameFilterDetails;
+    const bool matchCaseInsensitively = isOpenMode && hidesFilterDetails;
+
     ValList filterList;
     for (const std::string& f : filter) {
-        filterList.push_back(Val(f));
+        filterList.push_back(Val(matchCaseInsensitively ? caseInsensitiveNameFilter(f) : f));
     }
 
     q.set("nameFilters", filterList);
@@ -437,8 +442,22 @@ io::paths_t Interactive::selectOpeningFilesSync(const std::string& title, const 
 
     return paths;
 #else
-    NOT_SUPPORTED;
-    return io::paths_t{ selectOpeningFileSync(title, dir, filter, options) };
+    UriQuery q = makeSelectFileQuery(FileDialogMode::OpenFiles, title, dir, filter, options);
+
+    RetVal<Val> rv = openSync(q);
+    if (!rv.ret) {
+        return io::paths_t();
+    }
+
+    ValList urls = rv.val.toList();
+
+    io::paths_t paths;
+    paths.reserve(urls.size());
+    for (const Val& url : urls) {
+        paths.emplace_back(QUrl::fromUserInput(url.toQString()).toLocalFile());
+    }
+
+    return paths;
 #endif
 }
 
