@@ -71,6 +71,7 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
 
     m_mainStreamEvents.clear();
     m_controllerStates.clear();
+    m_liveOverrides.clear();
 
     if (m_onMainStreamFlushed) {
         m_onMainStreamFlushed();
@@ -290,8 +291,18 @@ void VstSequencer::addLiveControlChange(const mpe::ControllerChangeEvent& event)
         return;
     }
 
+    const ControlIdx controlIdx = static_cast<ControlIdx>(event.controller);
     const PluginParamId paramId = controlIt->second;
-    m_liveEvents.emplace_back(ParamChangeEvent { paramId, static_cast<PluginParamValue>(event.val.raw()) });
+    const PluginParamValue value = static_cast<PluginParamValue>(event.val.raw());
+    m_liveEvents.emplace_back(ParamChangeEvent { paramId, value });
+
+    auto overrideIt = m_liveOverrides.find(controlIdx);
+    if (overrideIt != m_liveOverrides.end() && overrideIt->second.removedFrom <= m_playbackPosition) {
+        overrideIt->second.value = value; // the main stream values from here on are already gone
+        return;
+    }
+
+    m_liveOverrides.insert_or_assign(controlIdx, LiveOverride { value, m_playbackPosition });
 
     // The values still to come from the main stream would immediately undo the live one
     for (auto it = m_mainStreamEvents.lower_bound(m_playbackPosition); it != m_mainStreamEvents.end(); ++it) {
@@ -308,6 +319,11 @@ VstSequencer::EventSequence VstSequencer::takeLiveEvents()
     EventSequence events = std::move(m_liveEvents);
     m_liveEvents.clear();
     return events;
+}
+
+void VstSequencer::clearLiveEvents()
+{
+    m_liveEvents.clear();
 }
 
 void VstSequencer::addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp,
@@ -398,8 +414,20 @@ void VstSequencer::midiStateBefore(const audio::msecs_t position, EventSequence&
         offEvents.insert(offEvents.end(), state.offEvents.cbegin(), state.offEvents.cend());
     }
 
+    // A controller overridden live keeps its live value (it replaces the automation until the main stream is updated)
+    for (const auto& [controlIdx, liveOverride] : m_liveOverrides) {
+        auto mappingIt = m_mapping.find(controlIdx);
+        if (mappingIt != m_mapping.cend()) {
+            onEvents.emplace_back(ParamChangeEvent { mappingIt->second, liveOverride.value });
+        }
+    }
+
     // MIDI CC automation: the value each automated controller should have at the start position
     for (const auto& [controlIdx, values] : m_controllerStates) {
+        if (m_liveOverrides.find(controlIdx) != m_liveOverrides.cend()) {
+            continue;
+        }
+
         auto valueIt = values.lower_bound(position);
         if (valueIt == values.cbegin()) {
             continue;

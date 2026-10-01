@@ -43,6 +43,7 @@ public:
     //! is only played when stopped. Each one also overrides its controller's main stream values from there
     //! on (a CC being recorded replaces the existing curve), until the main stream is updated again
     EventSequence takeLiveEvents();
+    void clearLiveEvents();
 
 private:
     void updateMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics) override;
@@ -91,5 +92,15 @@ private:
     std::map<ControlIdx, std::map<audio::msecs_t, PluginParamValue> > m_controllerStates;
 
     EventSequence m_liveEvents;
+
+    //! NOTE: per controller overridden live since the main stream was last updated: its latest live value
+    //! (what a chase after a seek must restore, not the overridden automation) and the position from which
+    //! its main stream values were already removed (so that a fast controller doesn't rescan the stream
+    //! on every message)
+    struct LiveOverride {
+        PluginParamValue value = 0.;
+        audio::msecs_t removedFrom = 0;
+    };
+    std::map<ControlIdx, LiveOverride> m_liveOverrides;
 };
 }

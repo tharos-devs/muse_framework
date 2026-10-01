@@ -166,6 +166,8 @@ void VstSynthesiser::setMode(const muse::audio::ProcessMode mode)
     // come out later, together with the next chase's note-on of the same keyswitch
     if (!isActive) {
         m_pendingChaseOffEvents.clear();
+        // A live MIDI CC that arrived after the last block must not come out at the next start, over the chase
+        m_sequencer.clearLiveEvents();
     }
     toggleVolumeGain(isActive);
     m_vstAudioClient->setIsPlaying(isActive);
