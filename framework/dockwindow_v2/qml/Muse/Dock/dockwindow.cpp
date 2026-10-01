@@ -633,7 +633,15 @@ void DockWindow::syncFloatingLayoutsToViewSize()
             continue;
         }
 
-        floatingLayout->setLayoutSize(floatingLayout->view()->size());
+        //! NOTE: a view that hasn't got its real size yet (the deferred call covers it) can't hold
+        //! the layout - setting it anyway would only make KDDockWidgets log a layout error
+        const QSize viewSize = floatingLayout->view()->size();
+        const QSize minSize = floatingLayout->layoutMinimumSize();
+        if (viewSize.isEmpty() || viewSize.width() < minSize.width() || viewSize.height() < minSize.height()) {
+            continue;
+        }
+
+        floatingLayout->setLayoutSize(viewSize);
     }
 }
 
