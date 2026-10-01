@@ -35,6 +35,10 @@
 
 #include "global/async/async.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+
 #include "dockcentralview.h"
 #include "dockpageview.h"
 #include "dockpanelview.h"
@@ -598,6 +602,50 @@ void DockWindow::restorePageState(const DockPageView* page)
     }
 }
 
+//! NOTE: KDDockWidgets (QtQuick) only records a window's normal geometry while it's in the normal state, so a
+//! window that stayed maximized for a whole session is saved with an empty one - restoring it then sets that
+//! empty geometry before maximizing it again, which leaves the window shrunk to its minimum size on macOS.
+//! Its maximized geometry is a sane normal geometry to fall back on
+static QByteArray withValidNormalGeometries(const QByteArray& layout)
+{
+    QJsonParseError error;
+    QJsonDocument document = QJsonDocument::fromJson(layout, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return layout;
+    }
+
+    QJsonObject root = document.object();
+    bool changed = false;
+
+    for (const QString& windowsKey : { QStringLiteral("mainWindows"), QStringLiteral("floatingWindows") }) {
+        QJsonArray windows = root.value(windowsKey).toArray();
+
+        for (qsizetype i = 0; i < windows.size(); ++i) {
+            QJsonObject window = windows.at(i).toObject();
+            const QJsonObject normalGeometry = window.value(QStringLiteral("normalGeometry")).toObject();
+            const QJsonObject geometry = window.value(QStringLiteral("geometry")).toObject();
+
+            const bool isNormalEmpty = normalGeometry.value(QStringLiteral("width")).toInt() <= 0
+                                       || normalGeometry.value(QStringLiteral("height")).toInt() <= 0;
+            const bool isGeometryValid = geometry.value(QStringLiteral("width")).toInt() > 0
+                                         && geometry.value(QStringLiteral("height")).toInt() > 0;
+            if (!isNormalEmpty || !isGeometryValid) {
+                continue;
+            }
+
+            window.insert(QStringLiteral("normalGeometry"), geometry);
+            windows.replace(i, window);
+            changed = true;
+        }
+
+        if (changed) {
+            root.insert(windowsKey, windows);
+        }
+    }
+
+    return changed ? QJsonDocument(root).toJson(QJsonDocument::Compact) : layout;
+}
+
 bool DockWindow::restoreLayout(const QByteArray& layout, bool restoreRelativeToMainWindow)
 {
     if (layout.isEmpty()) {
@@ -610,7 +658,7 @@ bool DockWindow::restoreLayout(const QByteArray& layout, bool restoreRelativeToM
                   : KDDockWidgets::RestoreOption_None;
 
     KDDockWidgets::LayoutSaver layoutSaver(iocContext()->id, option);
-    bool ok = layoutSaver.restoreLayout(layout);
+    bool ok = layoutSaver.restoreLayout(withValidNormalGeometries(layout));
 
     //! NOTE: KDDockWidgets' Layout::onResize() ignores every resize while a restore is in progress,
     //! but a restored floating window's layout view only reaches its real size (the restored window
