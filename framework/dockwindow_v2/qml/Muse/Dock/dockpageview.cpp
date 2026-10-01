@@ -184,6 +184,11 @@ QList<DockPanelView*> DockPageView::findPanelsForDropping(const DockPanelView* p
     QList<DockPanelView*> result;
 
     for (DockPanelView* destinationPanel : panels()) {
+        //! NOTE: the main window's drop logic only handles its own docks (see DropController)
+        if (destinationPanel->isInSecondaryWindow()) {
+            continue;
+        }
+
         if (destinationPanel->isTabAllowed(panel)) {
             result << destinationPanel;
         }
@@ -216,6 +221,12 @@ Location DockPageView::actualLocation(const DockBase* dock) const
     //! the panel's real current side from its live frame geometry instead, so reopening
     //! a sibling panel (e.g. Mixer) tabs it alongside where this one actually is, not
     //! where it used to be declared.
+    //! NOTE: a dock in the secondary window has no location relative to this page's central dock
+    //! (its geometry isn't even in the same window), so it never matches one
+    if (dock->isInSecondaryWindow()) {
+        return Location::Undefined;
+    }
+
     const DockBase* central = centralDock();
     if (!central) {
         return dock->location();
@@ -474,6 +485,21 @@ void DockPageView::setDefaultNavigationControl(muse::ui::NavigationControl* cont
 void DockPageView::forceLayout()
 {
     emit layoutRequested();
+}
+
+bool DockPageView::secondaryWindowAvailable() const
+{
+    return m_secondaryWindowAvailable;
+}
+
+void DockPageView::setSecondaryWindowAvailable(bool available)
+{
+    if (available == m_secondaryWindowAvailable) {
+        return;
+    }
+
+    m_secondaryWindowAvailable = available;
+    emit secondaryWindowAvailableChanged();
 }
 
 QVariant DockPageView::tours() const
