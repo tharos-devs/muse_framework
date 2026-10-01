@@ -273,6 +273,16 @@ KDDockWidgets::Core::MainWindow* DockBase::dockedMainWindow() const
     return layout ? layout->mainWindow() : nullptr;
 }
 
+bool DockBase::reopensFloating() const
+{
+    if (!m_dockWidget || m_dockWidget->isOpen()) {
+        return false;
+    }
+
+    const KDDockWidgets::Positions* lastPosition = m_dockWidget->d->lastPosition().get();
+    return lastPosition && lastPosition->wasFloating();
+}
+
 bool DockBase::isInSecondaryWindow() const
 {
     return m_dockWidget && m_dockWidget->isOpen() && isSecondaryWindow(m_dockWidget->mainWindow());
@@ -289,12 +299,7 @@ bool DockBase::belongsToSecondaryWindow() const
     }
 
     //! NOTE: a closed dock widget reopens where it was last docked, unless it was floating
-    const KDDockWidgets::Positions* lastPosition = m_dockWidget->d->lastPosition().get();
-    if (!lastPosition || lastPosition->wasFloating()) {
-        return false;
-    }
-
-    return isSecondaryWindow(dockedMainWindow());
+    return !reopensFloating() && isSecondaryWindow(dockedMainWindow());
 }
 
 bool DockBase::inited() const

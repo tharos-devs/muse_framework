@@ -46,6 +46,10 @@ namespace KDDockWidgets::QtQuick {
 class MainWindow;
 }
 
+namespace KDDockWidgets::Core {
+class MainWindow;
+}
+
 namespace muse::dock {
 class DockToolBarView;
 class DockingHolderView;
@@ -118,6 +122,10 @@ public:
 
     QList<DockToolBarView*> topLevelToolBars(const DockPageView* page) const;
 
+    //! Whether the main window covers this point and is in front of the secondary window there, as far as
+    //! we can tell: KDDockWidgets can't (except on Windows), and always picks the secondary window
+    bool isMainWindowInFrontAt(const QPoint& globalPos) const;
+
 signals:
     void pageLoaded();
     void currentPageUriChanged(const QString& uri);
@@ -168,7 +176,9 @@ private:
     void notifyAboutDocksOpenStatus();
 
     void initSecondaryWindow();
+    void applySecondaryWindowOpen(bool open);
     bool isSecondaryWindowShown() const;
+    bool isSecondaryMainWindow(const KDDockWidgets::Core::MainWindow* mainWindow) const;
     void updateSecondaryWindowVisibility(const DockPageView* page);
 
     KDDockWidgets::QtQuick::MainWindow* m_mainWindow = nullptr;
@@ -187,6 +197,7 @@ private:
     KDDockWidgets::QtQuick::MainWindow* m_secondaryMainWindow = nullptr;
     bool m_secondaryWindowOpen = false;
     bool m_updatingSecondaryWindowVisibility = false;
+    bool m_mainWindowActivatedLast = true;
     async::Notification m_secondaryWindowOpenChanged;
 };
 }

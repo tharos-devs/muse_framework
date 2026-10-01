@@ -32,6 +32,7 @@
 #include "qml/Muse/Dock/dockpageview.h"
 #include "qml/Muse/Dock/dockpanelview.h"
 #include "qml/Muse/Dock/docktoolbarview.h"
+#include "qml/Muse/Dock/dockwindow.h"
 
 #include "globaltypes.h"
 
@@ -125,6 +126,12 @@ KDDropLocation DropController::hover(KDDockWidgets::Point globalPos)
     }
 
     if (KDDockWidgets::Core::DropArea* dropArea = secondaryWindowDropArea()) {
+        //! NOTE: KDDockWidgets picks the secondary window wherever it's under the mouse, even behind the main window
+        const DockWindow* window = dynamic_cast<const DockWindow*>(dockWindow());
+        if (window && window->isMainWindowInFrontAt(globalPos)) {
+            return KDDropLocation::DropLocation_None;
+        }
+
         return hoverSecondaryWindow(dropArea, globalPos);
     }
 

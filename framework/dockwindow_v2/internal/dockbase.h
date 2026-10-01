@@ -118,6 +118,9 @@ public:
     //! nullptr if it has never been docked, or has lost its last docked position
     KDDockWidgets::Core::MainWindow* dockedMainWindow() const;
 
+    //! Closed while it was floating: reopening it makes it float again
+    bool reopensFloating() const;
+
     //! Docked (and open) in the window's secondary window
     bool isInSecondaryWindow() const;
     //! Docked in the secondary window, or closed while it was docked there (reopening it puts it back there)
