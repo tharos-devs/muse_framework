@@ -24,14 +24,17 @@
 
 #include "audio/engine/internal/abstracteventsequencer.h"
 
+#include <set>
+
 #include "vsttypes.h"
 
 namespace muse::vst {
 class VstSequencer : public audio::engine::AbstractEventSequencer<VstEvent, ParamChangeEvent, muse::audio::gain_t>
 {
 public:
-    //! NOTE: eventBus and channel (0-based) are where every note, keyswitch and CC of the track goes
-    void init(ParamsMapping&& mapping, bool useDynamicEvents, int eventBus = 0, int channel = 0);
+    //! NOTE: mappingsByChannel = the plugin's CC mapping for each MIDI channel of eventBus. The notes and
+    //! keyswitches go to channel (0-based), or to the channel of their articulation (MidiMessagesEvent::channel)
+    void init(std::vector<ParamsMapping>&& mappingsByChannel, bool useDynamicEvents, int eventBus, int channel);
 
     muse::audio::gain_t currentGain() const;
 
@@ -54,7 +57,7 @@ private:
 
     void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicAutomationLayers& layers);
-    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::timestamp_t notesOffset,
+    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::timestamp_t notesOffset, const int channel,
                       SostenutoTimeAndDurations& sostenutoTimeAndDurations);
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event,
@@ -63,15 +66,23 @@ private:
     void addLiveNoteAndControllerEvents(const mpe::PlaybackEventsMap& events);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                         const PluginParamValue value);
+    void addParamChangeOnChannel(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
+                                 const PluginParamValue value, const int channel);
     void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta);
     static mpe::timestamp_t midiMessagesNotesOffset(const mpe::PlaybackEventList& events);
+    int midiMessagesChannel(const mpe::PlaybackEventList& events) const;
+    void updateChannelTimeline(const mpe::PlaybackEventsMap& events);
+    int channelAt(const mpe::timestamp_t timestamp) const;
+    void addControllerStatesOnChannelChanges(EventSequenceMap& destination);
+    const ParamsMapping& mapping(int channel) const;
+    std::optional<PluginParamId> paramIdAt(const ControlIdx controlIdx, const mpe::timestamp_t timestamp) const;
     void addMidiMessagesEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState);
     void addSostenutoEvents(EventSequenceMap& destination, const SostenutoTimeAndDurations& sostenutoTimeAndDurations);
 
     void sortNoteOnEventsByPitch(EventSequenceMap& destination);
 
     VstEvent buildEvent(const Steinberg::Vst::Event::EventTypes type, const int32_t noteIdx, const float velocityFraction,
-                        const float tuning) const;
+                        const float tuning, const int channel) const;
 
     int32_t noteIndex(const mpe::pitch_level_t pitchLevel) const;
     float noteTuning(const mpe::NoteEvent& noteEvent, const int noteIdx) const;
@@ -81,9 +92,16 @@ private:
 
     bool m_inited = false;
     bool m_useDynamicEvents = false;
-    ParamsMapping m_mapping;
+    std::vector<ParamsMapping> m_mappingsByChannel;
     int m_eventBus = 0;
     int m_channel = 0;
+
+    //! NOTE: the channel of the articulation played from each timestamp on (main stream): CC curves, sustain
+    //! and pitch bend go to the channel of the articulation playing at that time, or else to the track's
+    std::map<mpe::timestamp_t, int> m_channelTimeline;
+
+    //! NOTE: while building events: the channels the sustain pedal is down on, to release it on all of them
+    std::set<int> m_sustainDownChannels;
 
     struct MidiState {
         EventSequence onEvents;

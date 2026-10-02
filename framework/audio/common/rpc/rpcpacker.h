@@ -612,12 +612,12 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::MidiMessage& va
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::mpe::MidiMessagesEvent& value)
 {
-    p.process(value.messages, value.messagesOffset, value.notesOffset, value.layerIdx);
+    p.process(value.messages, value.messagesOffset, value.notesOffset, value.channel, value.layerIdx);
 }
 
 inline void unpack_custom(muse::msgpack::UnPacker& p, muse::mpe::MidiMessagesEvent& value)
 {
-    p.process(value.messages, value.messagesOffset, value.notesOffset, value.layerIdx);
+    p.process(value.messages, value.messagesOffset, value.notesOffset, value.channel, value.layerIdx);
 }
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::mpe::PlaybackEvent& value)

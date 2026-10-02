@@ -54,11 +54,12 @@ static const mpe::ArticulationTypeSet BEND_SUPPORTED_TYPES {
     mpe::ArticulationType::Multibend, mpe::ArticulationType::ContinuousGlissando,
 };
 
-void VstSequencer::init(ParamsMapping&& mapping, bool useDynamicEvents, int eventBus, int channel)
+void VstSequencer::init(std::vector<ParamsMapping>&& mappingsByChannel, bool useDynamicEvents, int eventBus, int channel)
 {
-    m_mapping = std::move(mapping);
+    m_mappingsByChannel = std::move(mappingsByChannel);
     m_eventBus = eventBus;
     m_channel = channel;
+    m_channelTimeline.clear();
     m_useDynamicEvents = useDynamicEvents;
     m_inited = true;
 
@@ -75,6 +76,8 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
     m_controllerStates.clear();
     m_liveOverrides.clear();
 
+    updateChannelTimeline(events);
+
     if (m_onMainStreamFlushed) {
         m_onMainStreamFlushed();
     }
@@ -82,6 +85,7 @@ void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, 
     addPlaybackEvents(m_mainStreamEvents, events, true /*recordState*/);
     sortNoteOnEventsByPitch(m_mainStreamEvents);
     addMidiMessagesEvents(m_mainStreamEvents, events, true /*recordState*/);
+    addControllerStatesOnChannelChanges(m_mainStreamEvents);
 
     if (m_useDynamicEvents) {
         addDynamicEvents(m_mainStreamEvents, dynamics);
@@ -179,13 +183,15 @@ muse::audio::gain_t VstSequencer::currentGain() const
 void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState)
 {
     SostenutoTimeAndDurations sostenutoTimeAndDurations;
+    m_sustainDownChannels.clear();
 
     for (const auto& evPair : events) {
         const mpe::timestamp_t notesOffset = midiMessagesNotesOffset(evPair.second);
+        const int channel = midiMessagesChannel(evPair.second);
 
         for (const mpe::PlaybackEvent& event : evPair.second) {
             if (std::holds_alternative<mpe::NoteEvent>(event)) {
-                addNoteEvent(destination, std::get<mpe::NoteEvent>(event), notesOffset, sostenutoTimeAndDurations);
+                addNoteEvent(destination, std::get<mpe::NoteEvent>(event), notesOffset, channel, sostenutoTimeAndDurations);
             } else if (std::holds_alternative<mpe::ControllerChangeEvent>(event)) {
                 addControlChangeEvent(destination, evPair.first, std::get<mpe::ControllerChangeEvent>(event), recordState);
             }
@@ -230,7 +236,7 @@ void VstSequencer::addDynamicEvents(EventSequenceMap& destination, const mpe::Dy
 }
 
 void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& originNoteEvent, const mpe::timestamp_t notesOffset,
-                                SostenutoTimeAndDurations& sostenutoTimeAndDurations)
+                                const int channel, SostenutoTimeAndDurations& sostenutoTimeAndDurations)
 {
     std::optional<mpe::NoteEvent> shiftedNoteEvent;
     if (notesOffset != 0) {
@@ -251,12 +257,13 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
             destination[arrangementCtx.actualTimestamp].emplace_back(expressionLevel(noteEvent.expressionCtx().nominalDynamicLevel));
         }
 
-        destination[arrangementCtx.actualTimestamp].emplace_back(buildEvent(VstEvent::kNoteOnEvent, noteId, velocityFraction, tuning));
+        destination[arrangementCtx.actualTimestamp].emplace_back(buildEvent(VstEvent::kNoteOnEvent, noteId, velocityFraction, tuning,
+                                                                            channel));
     }
 
     if (arrangementCtx.hasEnd()) {
         const mpe::timestamp_t timestampTo = arrangementCtx.actualTimestamp + noteEvent.arrangementCtx().actualDuration;
-        destination[timestampTo].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning));
+        destination[timestampTo].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning, channel));
     }
 
     for (const auto& artPair : noteEvent.expressionCtx().articulations) {
@@ -286,12 +293,15 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
 
 void VstSequencer::addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta)
 {
+    // Released on the channel it was pressed on, even if the articulation changed channel since
+    const int channel = channelAt(meta.timestamp);
+
     if (meta.hasStart()) {
-        addParamChange(destination, meta.timestamp, SUSTAIN_IDX, 1);
+        addParamChangeOnChannel(destination, meta.timestamp, SUSTAIN_IDX, 1, channel);
     }
 
     if (meta.hasEnd()) {
-        addParamChange(destination, meta.timestamp + meta.overallDuration, SUSTAIN_IDX, 0);
+        addParamChangeOnChannel(destination, meta.timestamp + meta.overallDuration, SUSTAIN_IDX, 0, channel);
     }
 }
 
@@ -302,9 +312,19 @@ void VstSequencer::addControlChangeEvent(EventSequenceMap& destination, const mp
     case mpe::ControllerChangeEvent::Modulation:
         addParamChange(destination, timestamp, MODWHEEL_IDX, event.val);
         break;
-    case mpe::ControllerChangeEvent::SustainPedalOnOff:
-        addParamChange(destination, timestamp, SUSTAIN_IDX, event.val);
-        break;
+    case mpe::ControllerChangeEvent::SustainPedalOnOff: {
+        // Released on every channel it was pressed on, even if the articulation changed channel since
+        const int channel = channelAt(timestamp);
+        m_sustainDownChannels.insert(channel);
+        if (event.val.raw() >= 0.5f) {
+            addParamChangeOnChannel(destination, timestamp, SUSTAIN_IDX, event.val, channel);
+        } else {
+            for (const int downChannel : m_sustainDownChannels) {
+                addParamChangeOnChannel(destination, timestamp, SUSTAIN_IDX, event.val, downChannel);
+            }
+            m_sustainDownChannels.clear();
+        }
+    } break;
     case mpe::ControllerChangeEvent::PitchBend:
         addParamChange(destination, timestamp, PITCH_BEND_IDX, event.val);
         break;
@@ -322,15 +342,22 @@ void VstSequencer::addControlChangeEvent(EventSequenceMap& destination, const mp
 
 void VstSequencer::addLiveControlChange(const mpe::ControllerChangeEvent& event)
 {
-    auto controlIt = m_mapping.find(static_cast<ControlIdx>(event.controller));
-    if (controlIt == m_mapping.cend()) {
+    const ControlIdx controlIdx = static_cast<ControlIdx>(event.controller);
+    const std::optional<PluginParamId> liveParamId = paramIdAt(controlIdx, m_playbackPosition);
+    if (!liveParamId) {
         return;
     }
 
-    const ControlIdx controlIdx = static_cast<ControlIdx>(event.controller);
-    const PluginParamId paramId = controlIt->second;
     const PluginParamValue value = static_cast<PluginParamValue>(event.val.raw());
-    m_liveEvents.emplace_back(ParamChangeEvent { paramId, value });
+    m_liveEvents.emplace_back(ParamChangeEvent { *liveParamId, value });
+
+    // The main stream values to remove may be on any channel (the articulation may change later)
+    std::vector<PluginParamId> paramIds;
+    for (const ParamsMapping& channelMapping : m_mappingsByChannel) {
+        if (auto it = channelMapping.find(controlIdx); it != channelMapping.cend()) {
+            paramIds.push_back(it->second);
+        }
+    }
 
     auto overrideIt = m_liveOverrides.find(controlIdx);
     if (overrideIt != m_liveOverrides.end() && overrideIt->second.removedFrom <= m_playbackPosition) {
@@ -343,9 +370,9 @@ void VstSequencer::addLiveControlChange(const mpe::ControllerChangeEvent& event)
     // The values still to come from the main stream would immediately undo the live one
     for (auto it = m_mainStreamEvents.lower_bound(m_playbackPosition); it != m_mainStreamEvents.end(); ++it) {
         EventSequence& sequence = it->second;
-        sequence.erase(std::remove_if(sequence.begin(), sequence.end(), [paramId](const EventType& e) {
+        sequence.erase(std::remove_if(sequence.begin(), sequence.end(), [&paramIds](const EventType& e) {
             const auto* paramChange = std::get_if<ParamChangeEvent>(&e);
-            return paramChange && paramChange->paramId == paramId;
+            return paramChange && muse::contains(paramIds, paramChange->paramId);
         }), sequence.end());
     }
 }
@@ -365,43 +392,48 @@ void VstSequencer::clearLiveEvents()
 void VstSequencer::addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp,
                                   const ControlIdx controlIdx, const PluginParamValue value)
 {
-    auto controlIt = m_mapping.find(controlIdx);
-    if (controlIt == m_mapping.cend()) {
+    addParamChangeOnChannel(destination, timestamp, controlIdx, value, channelAt(timestamp));
+}
+
+void VstSequencer::addParamChangeOnChannel(EventSequenceMap& destination, const mpe::timestamp_t timestamp,
+                                           const ControlIdx controlIdx, const PluginParamValue value, const int channel)
+{
+    const ParamsMapping& channelMapping = mapping(channel);
+    auto mappingIt = channelMapping.find(controlIdx);
+    if (mappingIt == channelMapping.cend()) {
         return;
     }
 
-    const PluginParamId paramId = controlIt->second;
+    const PluginParamId paramId = mappingIt->second;
     EventSequence& events = destination[timestamp];
 
-    for (const EventType& e : events) {
-        if (!std::holds_alternative<ParamChangeEvent>(e)) {
-            continue;
-        }
+    const bool alreadyAdded = std::any_of(events.cbegin(), events.cend(), [paramId, value](const EventType& e) {
+        const auto* pce = std::get_if<ParamChangeEvent>(&e);
+        return pce && pce->paramId == paramId && RealIsEqual(pce->value, value);
+    });
 
-        const ParamChangeEvent& pce = std::get<ParamChangeEvent>(e);
-        if (pce.paramId == paramId && RealIsEqual(pce.value, value)) {
-            return;
-        }
+    if (!alreadyAdded) {
+        events.emplace_back(ParamChangeEvent { paramId, value });
     }
-
-    events.emplace_back(ParamChangeEvent { paramId, value });
 }
 
 void VstSequencer::addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent,
                                  const mpe::ArticulationMeta& artMeta)
 {
-    auto pitchBendIt = m_mapping.find(PITCH_BEND_IDX);
-    if (pitchBendIt == m_mapping.cend()) {
+    // On the channel of the note's articulation, all along the bend
+    const std::optional<PluginParamId> pitchBendParamId = paramIdAt(PITCH_BEND_IDX, noteEvent.arrangementCtx().actualTimestamp);
+    if (!pitchBendParamId) {
         return;
     }
+
+    auto addPitchBend = [&destination, &pitchBendParamId](const mpe::timestamp_t time, const float value) {
+        destination[time].push_back(ParamChangeEvent { *pitchBendParamId, value });
+    };
 
     const mpe::timestamp_t noteTimestampTo = noteEvent.arrangementCtx().actualTimestamp + noteEvent.arrangementCtx().actualDuration;
     const mpe::timestamp_t pitchBendTimestampTo = std::min(artMeta.timestamp + artMeta.overallDuration, noteTimestampTo);
 
-    ParamChangeEvent event;
-    event.paramId = pitchBendIt->second;
-    event.value = 0.5f;
-    destination[pitchBendTimestampTo].push_back(event);
+    addPitchBend(pitchBendTimestampTo, 0.5f);
 
     auto currIt = noteEvent.pitchCtx().pitchCurve.cbegin();
     auto nextIt = std::next(currIt);
@@ -432,8 +464,7 @@ void VstSequencer::addPitchCurve(EventSequenceMap& destination, const mpe::NoteE
             const float bendValue = static_cast<float>(point.y);
 
             if (time < pitchBendTimestampTo && !RealIsEqual(prevBendValue, bendValue)) {
-                event.value = bendValue;
-                destination[time].push_back(event);
+                addPitchBend(time, bendValue);
             }
 
             prevBendValue = bendValue;
@@ -452,9 +483,8 @@ void VstSequencer::midiStateBefore(const audio::msecs_t position, EventSequence&
 
     // A controller overridden live keeps its live value (it replaces the automation until the main stream is updated)
     for (const auto& [controlIdx, liveOverride] : m_liveOverrides) {
-        auto mappingIt = m_mapping.find(controlIdx);
-        if (mappingIt != m_mapping.cend()) {
-            onEvents.emplace_back(ParamChangeEvent { mappingIt->second, liveOverride.value });
+        if (const std::optional<PluginParamId> paramId = paramIdAt(controlIdx, position)) {
+            onEvents.emplace_back(ParamChangeEvent { *paramId, liveOverride.value });
         }
     }
 
@@ -469,9 +499,8 @@ void VstSequencer::midiStateBefore(const audio::msecs_t position, EventSequence&
             continue;
         }
 
-        auto mappingIt = m_mapping.find(controlIdx);
-        if (mappingIt != m_mapping.cend()) {
-            onEvents.emplace_back(ParamChangeEvent { mappingIt->second, std::prev(valueIt)->second });
+        if (const std::optional<PluginParamId> paramId = paramIdAt(controlIdx, position)) {
+            onEvents.emplace_back(ParamChangeEvent { *paramId, std::prev(valueIt)->second });
         }
     }
 }
@@ -487,6 +516,98 @@ mpe::timestamp_t VstSequencer::midiMessagesNotesOffset(const mpe::PlaybackEventL
     return 0;
 }
 
+int VstSequencer::midiMessagesChannel(const mpe::PlaybackEventList& events) const
+{
+    for (const mpe::PlaybackEvent& event : events) {
+        if (const auto* midiEvent = std::get_if<mpe::MidiMessagesEvent>(&event); midiEvent && midiEvent->channel >= 0) {
+            return midiEvent->channel;
+        }
+    }
+
+    return m_channel;
+}
+
+void VstSequencer::updateChannelTimeline(const mpe::PlaybackEventsMap& events)
+{
+    m_channelTimeline.clear();
+
+    for (const auto& [timestamp, eventList] : events) {
+        for (const mpe::PlaybackEvent& event : eventList) {
+            if (const auto* midiEvent = std::get_if<mpe::MidiMessagesEvent>(&event)) {
+                m_channelTimeline.insert_or_assign(timestamp, midiEvent->channel >= 0 ? midiEvent->channel : m_channel);
+                break;
+            }
+        }
+    }
+}
+
+int VstSequencer::channelAt(const mpe::timestamp_t timestamp) const
+{
+    auto it = m_channelTimeline.upper_bound(timestamp);
+    if (it == m_channelTimeline.cbegin()) {
+        return m_channel;
+    }
+
+    return std::prev(it)->second;
+}
+
+//! NOTE: when the articulation moves to another channel, that channel gets the current value of every
+//! automated controller - otherwise its instrument would play with whatever it last received
+void VstSequencer::addControllerStatesOnChannelChanges(EventSequenceMap& destination)
+{
+    if (m_controllerStates.empty()) {
+        return;
+    }
+
+    int previousChannel = m_channel;
+
+    for (const auto& [timestamp, channel] : m_channelTimeline) {
+        if (channel == previousChannel) {
+            continue;
+        }
+
+        previousChannel = channel;
+        const ParamsMapping& channelMapping = mapping(channel);
+
+        for (const auto& [controlIdx, values] : m_controllerStates) {
+            auto valueIt = values.upper_bound(static_cast<audio::msecs_t>(timestamp));
+            if (valueIt == values.cbegin()) {
+                continue;
+            }
+
+            auto mappingIt = channelMapping.find(controlIdx);
+            if (mappingIt == channelMapping.cend()) {
+                continue;
+            }
+
+            EventSequence& events = destination[timestamp];
+            events.insert(events.begin(), ParamChangeEvent { mappingIt->second, std::prev(valueIt)->second });
+        }
+    }
+}
+
+const ParamsMapping& VstSequencer::mapping(int channel) const
+{
+    static const ParamsMapping EMPTY_MAPPING;
+
+    if (channel < 0 || channel >= static_cast<int>(m_mappingsByChannel.size())) {
+        return EMPTY_MAPPING;
+    }
+
+    return m_mappingsByChannel.at(channel);
+}
+
+std::optional<PluginParamId> VstSequencer::paramIdAt(const ControlIdx controlIdx, const mpe::timestamp_t timestamp) const
+{
+    const ParamsMapping& channelMapping = mapping(channelAt(timestamp));
+    auto it = channelMapping.find(controlIdx);
+    if (it == channelMapping.cend()) {
+        return std::nullopt;
+    }
+
+    return it->second;
+}
+
 //! NOTE: must run after sortNoteOnEventsByPitch(), so keyswitch notes stay in front of the notes
 //! starting at the same time, whatever their pitch
 //! Messages identical to the previous ones are skipped: an articulation is only (re)sent when it actually changes
@@ -496,7 +617,7 @@ void VstSequencer::addMidiMessagesEvents(EventSequenceMap& destination, const mp
         m_midiStates.clear();
     }
 
-    const std::vector<mpe::MidiMessage>* lastMessages = nullptr;
+    const mpe::MidiMessagesEvent* lastEvent = nullptr;
 
     for (const auto& [timestamp, eventList] : events) {
         for (const mpe::PlaybackEvent& event : eventList) {
@@ -505,11 +626,13 @@ void VstSequencer::addMidiMessagesEvents(EventSequenceMap& destination, const mp
             }
 
             const mpe::MidiMessagesEvent& midiEvent = std::get<mpe::MidiMessagesEvent>(event);
-            if (lastMessages && *lastMessages == midiEvent.messages) {
+            if (lastEvent && lastEvent->messages == midiEvent.messages && lastEvent->channel == midiEvent.channel) {
                 continue;
             }
 
-            lastMessages = &midiEvent.messages;
+            lastEvent = &midiEvent;
+            const int channel = midiEvent.channel >= 0 ? midiEvent.channel : m_channel;
+            const ParamsMapping& channelMapping = mapping(channel);
 
             EventSequence onEvents;
             EventSequence offEvents;
@@ -519,8 +642,8 @@ void VstSequencer::addMidiMessagesEvents(EventSequenceMap& destination, const mp
                 case mpe::MidiMessage::Type::Note: {
                     const uint8_t velocity = message.value > 0 ? message.value : DEFAULT_KEYSWITCH_VELOCITY;
                     const float velocityFraction = std::min(velocity, uint8_t(127)) / 127.f;
-                    onEvents.emplace_back(buildEvent(VstEvent::kNoteOnEvent, message.number, velocityFraction, 0.f));
-                    offEvents.emplace_back(buildEvent(VstEvent::kNoteOffEvent, message.number, velocityFraction, 0.f));
+                    onEvents.emplace_back(buildEvent(VstEvent::kNoteOnEvent, message.number, velocityFraction, 0.f, channel));
+                    offEvents.emplace_back(buildEvent(VstEvent::kNoteOffEvent, message.number, velocityFraction, 0.f, channel));
                 } break;
                 case mpe::MidiMessage::Type::ControlChange:
                 case mpe::MidiMessage::Type::ProgramChange: {
@@ -529,8 +652,8 @@ void VstSequencer::addMidiMessagesEvents(EventSequenceMap& destination, const mp
                                                   : PROGRAM_CHANGE_IDX;
                     const uint8_t value = message.type == mpe::MidiMessage::Type::ControlChange ? message.value : message.number;
 
-                    auto controlIt = m_mapping.find(controlIdx);
-                    if (controlIt == m_mapping.cend()) {
+                    auto controlIt = channelMapping.find(controlIdx);
+                    if (controlIt == channelMapping.cend()) {
                         break;
                     }
 
@@ -565,17 +688,18 @@ void VstSequencer::addSostenutoEvents(EventSequenceMap& destination, const Soste
     for (size_t i = 0; i < sostenutoTimeAndDurations.size(); ++i) {
         const mpe::TimestampAndDuration& currentTnD = sostenutoTimeAndDurations.at(i);
         const mpe::timestamp_t timestampTo = currentTnD.timestamp + currentTnD.duration;
+        const int channel = channelAt(currentTnD.timestamp); // released on the channel it was pressed on
 
-        addParamChange(destination, currentTnD.timestamp, SOSTENUTO_IDX, 1);
+        addParamChangeOnChannel(destination, currentTnD.timestamp, SOSTENUTO_IDX, 1, channel);
 
         if (i == sostenutoTimeAndDurations.size() - 1) {
-            addParamChange(destination, timestampTo, SOSTENUTO_IDX, 0);
+            addParamChangeOnChannel(destination, timestampTo, SOSTENUTO_IDX, 0, channel);
             continue;
         }
 
         const mpe::TimestampAndDuration& nextTnD = sostenutoTimeAndDurations.at(i + 1);
         if (timestampTo <= nextTnD.timestamp) { // handle potential overlap
-            addParamChange(destination, timestampTo, SOSTENUTO_IDX, 0);
+            addParamChangeOnChannel(destination, timestampTo, SOSTENUTO_IDX, 0, channel);
         }
     }
 }
@@ -607,7 +731,7 @@ void VstSequencer::sortNoteOnEventsByPitch(EventSequenceMap& destination)
 }
 
 VstEvent VstSequencer::buildEvent(const VstEvent::EventTypes type, const int32_t noteIdx, const float velocityFraction,
-                                  const float tuning) const
+                                  const float tuning, const int channel) const
 {
     VstEvent result;
 
@@ -619,13 +743,13 @@ VstEvent VstSequencer::buildEvent(const VstEvent::EventTypes type, const int32_t
 
     if (type == VstEvent::kNoteOnEvent) {
         result.noteOn.noteId = -1;
-        result.noteOn.channel = static_cast<Steinberg::int16>(m_channel);
+        result.noteOn.channel = static_cast<Steinberg::int16>(channel);
         result.noteOn.pitch = noteIdx;
         result.noteOn.tuning = tuning;
         result.noteOn.velocity = velocityFraction;
     } else {
         result.noteOff.noteId = -1;
-        result.noteOff.channel = static_cast<Steinberg::int16>(m_channel);
+        result.noteOff.channel = static_cast<Steinberg::int16>(channel);
         result.noteOff.pitch = noteIdx;
         result.noteOff.tuning = tuning;
         result.noteOff.velocity = velocityFraction;

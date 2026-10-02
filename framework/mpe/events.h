@@ -358,12 +358,13 @@ struct MidiMessagesEvent {
     std::vector<MidiMessage> messages;
     timestamp_t messagesOffset = 0; // when to send the messages, relative to the event's timestamp (e.g. a keyswitch sent ahead)
     timestamp_t notesOffset = 0; // shift for the notes stored at the same timestamp (e.g. to compensate a legato's slow attack)
+    int channel = -1; // MIDI channel (0-based) of the messages and of the notes stored at the same timestamp, -1 = the track's
     layer_idx_t layerIdx = 0;
 
     bool operator==(const MidiMessagesEvent& e) const
     {
         return messages == e.messages && messagesOffset == e.messagesOffset && notesOffset == e.notesOffset
-               && layerIdx == e.layerIdx;
+               && channel == e.channel && layerIdx == e.layerIdx;
     }
 };
 

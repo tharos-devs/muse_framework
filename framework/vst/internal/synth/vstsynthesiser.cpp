@@ -106,8 +106,16 @@ void VstSynthesiser::init(const OutputSpec& spec)
 
 void VstSynthesiser::initSequencer()
 {
-    m_sequencer.init(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS, m_params.midiPort, m_params.midiChannel),
-                     m_useDynamicEvents, m_params.midiPort, m_params.midiChannel);
+    //! NOTE: every channel, since the articulations of a map may each play on their own channel
+    static constexpr int MIDI_CHANNEL_COUNT = 16;
+
+    std::vector<ParamsMapping> mappingsByChannel;
+    mappingsByChannel.reserve(MIDI_CHANNEL_COUNT);
+    for (int channel = 0; channel < MIDI_CHANNEL_COUNT; ++channel) {
+        mappingsByChannel.push_back(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS, m_params.midiPort, channel));
+    }
+
+    m_sequencer.init(std::move(mappingsByChannel), m_useDynamicEvents, m_params.midiPort, m_params.midiChannel);
 }
 
 void VstSynthesiser::setMidiRouting(int port, int channel)

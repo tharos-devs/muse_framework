@@ -31,11 +31,11 @@ using namespace muse::audio::engine;
 using namespace muse::audioplugins;
 using namespace muse::midiremote;
 
-static size_t noteEventKey(int pitch, int channel)
+//! NOTE: must be unique per note: a collision (e.g. pitch 62 on channel 1 and 60 on channel 2) would
+//! drop one of them from m_playingNotes, so that it never gets its note-off on stop
+static size_t noteEventKey(int busIndex, int channel, int pitch)
 {
-    std::size_t h1 = std::hash<int> {}(pitch);
-    std::size_t h2 = std::hash<int> {}(channel);
-    return h1 ^ (h2 << 1);
+    return (static_cast<size_t>(busIndex) << 16) | (static_cast<size_t>(channel & 0xFF) << 8) | static_cast<size_t>(pitch & 0xFF);
 }
 
 static std::optional<TransportEvent> mmcToTransportEvent(const IMMCDecoderPtr& decoder, const MMCMessage& msg)
@@ -176,10 +176,10 @@ bool VstAudioClient::handleEvent(const VstEvent& event)
     ensureActivity();
 
     if (event.type == VstEvent::kNoteOnEvent) {
-        size_t key = noteEventKey(event.noteOn.pitch, event.noteOn.channel);
+        size_t key = noteEventKey(event.busIndex, event.noteOn.channel, event.noteOn.pitch);
         m_playingNotes.insert_or_assign(key, event);
     } else if (event.type == VstEvent::kNoteOffEvent) {
-        size_t key = noteEventKey(event.noteOff.pitch, event.noteOff.channel);
+        size_t key = noteEventKey(event.busIndex, event.noteOff.channel, event.noteOff.pitch);
         m_playingNotes.erase(key);
     }
 
