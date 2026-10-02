@@ -487,6 +487,20 @@ struct AudioSourceParams {
     AudioResourceMeta resourceMeta;
     AudioUnitConfig configuration;
 
+    //! NOTE MIDI routing of an event-driven instrument (VST3): the plugin's event input bus
+    //! ("port") and the MIDI channel, both 0-based. midiPortNames is filled by the synthesizer
+    //! once the plugin is loaded (not saved)
+    int midiPort = 0;
+    int midiChannel = 0;
+    std::vector<String> midiPortNames;
+
+    bool hasSameSource(const AudioSourceParams& other) const
+    {
+        return type() == other.type()
+               && resourceMeta == other.resourceMeta
+               && configuration == other.configuration;
+    }
+
     AudioSourceType type() const
     {
         return sourceTypeFromResourceType(resourceMeta.type);
@@ -500,9 +514,10 @@ struct AudioSourceParams {
 
     bool operator ==(const AudioSourceParams& other) const
     {
-        return type() == other.type()
-               && resourceMeta == other.resourceMeta
-               && configuration == other.configuration;
+        return hasSameSource(other)
+               && midiPort == other.midiPort
+               && midiChannel == other.midiChannel
+               && midiPortNames == other.midiPortNames;
     }
 
     bool operator !=(const AudioSourceParams& other) const { return !this->operator==(other); }

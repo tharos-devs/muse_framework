@@ -63,9 +63,11 @@ public:
     void setPlaybackPosition(const muse::audio::TimePosition& position) override;
 
     void setOutputSpec(const audio::OutputSpec& spec) override;
+    void setMidiRouting(int port, int channel) override;
     muse::audio::samples_t process(float* buffer, muse::audio::samples_t samplesPerChannel) override;
 
 private:
+    void initSequencer();
 
     void toggleVolumeGain(const bool isActive);
     audio::samples_t processSequence(const VstSequencer::EventSequence& sequence, const audio::samples_t samples, float* buffer);

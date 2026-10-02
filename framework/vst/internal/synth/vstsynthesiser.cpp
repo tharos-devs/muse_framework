@@ -21,6 +21,8 @@
  */
 #include "vstsynthesiser.h"
 
+#include <algorithm>
+
 #include "log.h"
 
 using namespace muse;
@@ -70,10 +72,16 @@ void VstSynthesiser::init(const OutputSpec& spec)
 
     auto onPluginLoaded = [this]() {
         m_pluginPtr->updatePluginConfig(m_params.configuration);
+        m_params.midiPortNames = m_vstAudioClient->eventInputBusNames();
+        m_params.midiPort = std::clamp(m_params.midiPort, 0, std::max(static_cast<int>(m_params.midiPortNames.size()) - 1, 0));
+        m_params.midiChannel = std::clamp(m_params.midiChannel, 0, 15);
+        // Bus activation must happen while the plugin is still inactive, i.e. before setOutputSpec()
+        m_vstAudioClient->setEventInputBus(m_params.midiPort);
         m_vstAudioClient->setOutputSpec(m_outputSpec);
         m_vstAudioClient->loadSupportedParams();
-        m_sequencer.init(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS), m_useDynamicEvents);
+        initSequencer();
         m_inited = true;
+        m_paramsChanges.send(m_params);
     };
 
     if (m_pluginPtr->isLoaded()) {
@@ -94,6 +102,43 @@ void VstSynthesiser::init(const OutputSpec& spec)
     m_sequencer.setOnOffStreamFlushed([this]() {
         m_vstAudioClient->flushSound();
     });
+}
+
+void VstSynthesiser::initSequencer()
+{
+    m_sequencer.init(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS, m_params.midiPort, m_params.midiChannel),
+                     m_useDynamicEvents, m_params.midiPort, m_params.midiChannel);
+}
+
+void VstSynthesiser::setMidiRouting(int port, int channel)
+{
+    if (!m_inited) {
+        // Applied once the plugin is loaded
+        m_params.midiPort = port;
+        m_params.midiChannel = channel;
+        return;
+    }
+
+    port = std::clamp(port, 0, std::max(static_cast<int>(m_params.midiPortNames.size()) - 1, 0));
+    channel = std::clamp(channel, 0, 15);
+
+    if (port == m_params.midiPort && channel == m_params.midiChannel) {
+        return;
+    }
+
+    // Notes still playing must end on the port/channel they started on
+    flushSound();
+
+    m_params.midiPort = port;
+    m_params.midiChannel = channel;
+
+    m_vstAudioClient->setEventInputBus(port);
+    initSequencer();
+
+    // The articulation/CC state now has to reach the new channel
+    if (m_sequencer.isActive()) {
+        m_midiStateChasePending = true;
+    }
 }
 
 void VstSynthesiser::toggleVolumeGain(const bool isActive)

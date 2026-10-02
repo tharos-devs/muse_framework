@@ -297,7 +297,7 @@ audio::samples_t VstAudioClient::process(float* output, samples_t samplesPerChan
     return samplesPerChannel;
 }
 
-ParamsMapping VstAudioClient::paramsMapping(const std::set<Steinberg::Vst::CtrlNumber>& controllers) const
+ParamsMapping VstAudioClient::paramsMapping(const std::set<Steinberg::Vst::CtrlNumber>& controllers, int eventBus, int channel) const
 {
     ParamsMapping result;
 
@@ -310,19 +310,71 @@ ParamsMapping VstAudioClient::paramsMapping(const std::set<Steinberg::Vst::CtrlN
         return result;
     }
 
-    for (const int busIdx : m_activeInputBusses) {
-        for (const auto& ctrlNum : controllers) {
-            PluginParamId id = 0;
+    for (const auto& ctrlNum : controllers) {
+        PluginParamId id = 0;
 
-            if (midiMapping->getMidiControllerAssignment(busIdx, 0, ctrlNum, id) != Steinberg::kResultOk) {
-                continue;
-            }
-
-            result.emplace(ctrlNum, id);
+        if (midiMapping->getMidiControllerAssignment(eventBus, static_cast<Steinberg::int16>(channel), ctrlNum, id)
+            != Steinberg::kResultOk) {
+            continue;
         }
+
+        result.emplace(ctrlNum, id);
     }
 
     return result;
+}
+
+std::vector<String> VstAudioClient::eventInputBusNames() const
+{
+    std::vector<String> result;
+
+    PluginComponentPtr component = pluginComponent();
+    if (!component) {
+        return result;
+    }
+
+    const int32_t busCount = component->getBusCount(BusMediaType::kEvent, BusDirection::kInput);
+
+    for (int32_t busIndex = 0; busIndex < busCount; ++busIndex) {
+        BusInfo busInfo;
+        component->getBusInfo(BusMediaType::kEvent, BusDirection::kInput, busIndex, busInfo);
+        result.push_back(String(reinterpret_cast<const char16_t*>(busInfo.name)));
+    }
+
+    return result;
+}
+
+void VstAudioClient::setEventInputBus(int busIndex)
+{
+    if (m_eventInputBus == busIndex) {
+        return;
+    }
+
+    PluginComponentPtr component = pluginComponent();
+    if (!component) {
+        return;
+    }
+
+    flushSound();
+
+    //! NOTE A bus may only be (de)activated while the plugin is inactive
+    const bool wasActive = m_isActive;
+    disableActivity();
+
+    //! NOTE The first bus stays active (it's the plugin's default one)
+    if (m_eventInputBus > 0) {
+        component->activateBus(BusMediaType::kEvent, BusDirection::kInput, m_eventInputBus, false);
+    }
+
+    if (busIndex > 0) {
+        component->activateBus(BusMediaType::kEvent, BusDirection::kInput, busIndex, true);
+    }
+
+    m_eventInputBus = busIndex;
+
+    if (wasActive) {
+        ensureActivity();
+    }
 }
 
 IAudioProcessorPtr VstAudioClient::pluginProcessor() const

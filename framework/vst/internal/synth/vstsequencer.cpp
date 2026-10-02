@@ -54,9 +54,11 @@ static const mpe::ArticulationTypeSet BEND_SUPPORTED_TYPES {
     mpe::ArticulationType::Multibend, mpe::ArticulationType::ContinuousGlissando,
 };
 
-void VstSequencer::init(ParamsMapping&& mapping, bool useDynamicEvents)
+void VstSequencer::init(ParamsMapping&& mapping, bool useDynamicEvents, int eventBus, int channel)
 {
     m_mapping = std::move(mapping);
+    m_eventBus = eventBus;
+    m_channel = channel;
     m_useDynamicEvents = useDynamicEvents;
     m_inited = true;
 
@@ -609,7 +611,7 @@ VstEvent VstSequencer::buildEvent(const VstEvent::EventTypes type, const int32_t
 {
     VstEvent result;
 
-    result.busIndex = 0;
+    result.busIndex = m_eventBus;
     result.sampleOffset = 0;
     result.ppqPosition = 0;
     result.flags = VstEvent::kIsLive;
@@ -617,13 +619,13 @@ VstEvent VstSequencer::buildEvent(const VstEvent::EventTypes type, const int32_t
 
     if (type == VstEvent::kNoteOnEvent) {
         result.noteOn.noteId = -1;
-        result.noteOn.channel = 0;
+        result.noteOn.channel = static_cast<Steinberg::int16>(m_channel);
         result.noteOn.pitch = noteIdx;
         result.noteOn.tuning = tuning;
         result.noteOn.velocity = velocityFraction;
     } else {
         result.noteOff.noteId = -1;
-        result.noteOff.channel = 0;
+        result.noteOff.channel = static_cast<Steinberg::int16>(m_channel);
         result.noteOff.pitch = noteIdx;
         result.noteOff.tuning = tuning;
         result.noteOff.velocity = velocityFraction;

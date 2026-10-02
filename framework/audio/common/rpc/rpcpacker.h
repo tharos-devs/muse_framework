@@ -300,12 +300,12 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::SoundPreset& 
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::AudioSourceParams& value)
 {
-    p.process(value.resourceMeta, value.configuration);
+    p.process(value.resourceMeta, value.configuration, value.midiPort, value.midiChannel, value.midiPortNames);
 }
 
 inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::AudioSourceParams& value)
 {
-    p.process(value.resourceMeta, value.configuration);
+    p.process(value.resourceMeta, value.configuration, value.midiPort, value.midiChannel, value.midiPortNames);
 }
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::SoundTrackType& value)

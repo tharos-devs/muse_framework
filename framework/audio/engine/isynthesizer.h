@@ -51,6 +51,9 @@ public:
     virtual const audio::AudioInputParams& params() const = 0;
     virtual async::Channel<audio::AudioInputParams> paramsChanged() const = 0;
 
+    //! NOTE Event input bus and MIDI channel (0-based) of an event-driven instrument; ignored by default
+    virtual void setMidiRouting(int /*port*/, int /*channel*/) {}
+
     virtual TimePosition playbackPosition() const = 0;
     virtual void setPlaybackPosition(const TimePosition& position) = 0;
 

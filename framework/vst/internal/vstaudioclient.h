@@ -54,7 +54,10 @@ public:
 
     audio::samples_t process(float* output, audio::samples_t samplesPerChannel, audio::samples_t playbackPositionSamples = 0);
 
-    ParamsMapping paramsMapping(const std::set<Steinberg::Vst::CtrlNumber>& controllers) const;
+    ParamsMapping paramsMapping(const std::set<Steinberg::Vst::CtrlNumber>& controllers, int eventBus, int channel) const;
+
+    std::vector<String> eventInputBusNames() const;
+    void setEventInputBus(int busIndex);
 
 private:
     IAudioProcessorPtr pluginProcessor() const;
@@ -84,6 +87,7 @@ private:
 
     std::vector<int> m_activeOutputBusses;
     std::vector<int> m_activeInputBusses;
+    int m_eventInputBus = 0;
 
     VstEventList m_inputEvents;
     VstParameterChanges m_inputParamChanges;

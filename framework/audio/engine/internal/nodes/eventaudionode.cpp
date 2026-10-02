@@ -128,6 +128,18 @@ void EventAudioNode::applyInputParams(const AudioInputParams& requiredParams)
         return;
     }
 
+    //! NOTE Only the MIDI routing changed: re-route the current synth instead of recreating it
+    //! (which would reload the plugin)
+    if (m_synth && m_params.isValid() && m_synth->params().hasSameSource(requiredParams)) {
+        const AudioInputParams& current = m_synth->params();
+        if (current.midiPort != requiredParams.midiPort || current.midiChannel != requiredParams.midiChannel) {
+            m_synth->setMidiRouting(requiredParams.midiPort, requiredParams.midiChannel);
+            m_params = m_synth->params();
+            m_paramsChanges.send(m_params);
+        }
+        return;
+    }
+
     SynthCtx ctx = currentSynthCtx();
 
     if (m_synth) {
