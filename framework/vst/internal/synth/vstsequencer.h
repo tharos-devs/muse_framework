@@ -55,22 +55,23 @@ private:
 
     using SostenutoTimeAndDurations = std::vector<mpe::TimestampAndDuration>;
 
-    void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState);
+    void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState,
+                           const std::optional<int>& notesChannel = std::nullopt);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicAutomationLayers& layers);
     void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::timestamp_t notesOffset, const int channel,
                       SostenutoTimeAndDurations& sostenutoTimeAndDurations);
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event,
-                               bool recordState);
+                               bool recordState, const std::optional<int>& channel);
     void addLiveControlChange(const mpe::ControllerChangeEvent& event);
     void addLiveNoteAndControllerEvents(const mpe::PlaybackEventsMap& events);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
-                        const PluginParamValue value);
+                        const PluginParamValue value, const std::optional<int>& channel = std::nullopt);
     void addParamChangeOnChannel(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                                  const PluginParamValue value, const int channel);
     void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta);
     static mpe::timestamp_t midiMessagesNotesOffset(const mpe::PlaybackEventList& events);
-    int midiMessagesChannel(const mpe::PlaybackEventList& events) const;
+    std::optional<int> midiMessagesChannel(const mpe::PlaybackEventList& events) const;
     void updateChannelTimeline(const mpe::PlaybackEventsMap& events);
     int channelAt(const mpe::timestamp_t timestamp) const;
     void addControllerStatesOnChannelChanges(EventSequenceMap& destination);
@@ -102,6 +103,10 @@ private:
 
     //! NOTE: while building events: the channels the sustain pedal is down on, to release it on all of them
     std::set<int> m_sustainDownChannels;
+
+    //! NOTE: the channel each key held on a MIDI keyboard was played on (a note-on with no end yet), so that
+    //! its note-off goes there too, even if the articulation (or the selected chord) changed in between
+    std::map<int32_t, int> m_heldNoteChannels;
 
     struct MidiState {
         EventSequence onEvents;

@@ -141,8 +141,9 @@ void VstSequencer::addLiveNoteAndControllerEvents(const mpe::PlaybackEventsMap& 
         }
     }
 
+    // On the channel of the articulation playing at the playback position
     EventSequenceMap sequences;
-    addPlaybackEvents(sequences, immediateEvents, false /*recordState*/);
+    addPlaybackEvents(sequences, immediateEvents, false /*recordState*/, channelAt(static_cast<mpe::timestamp_t>(m_playbackPosition)));
 
     if (sequences.empty() || sequences.size() > 1 || sequences.begin()->first != audio::msecs_t(0)) {
         return;
@@ -180,20 +181,28 @@ muse::audio::gain_t VstSequencer::currentGain() const
     return expressionLevel(maxDynamicLevel);
 }
 
-void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState)
+void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState,
+                                     const std::optional<int>& notesChannel)
 {
     SostenutoTimeAndDurations sostenutoTimeAndDurations;
-    m_sustainDownChannels.clear();
+    // Kept between the off-stream calls: a pedal pressed on a MIDI keyboard is released in a later one
+    if (recordState) {
+        m_sustainDownChannels.clear();
+    }
 
     for (const auto& evPair : events) {
         const mpe::timestamp_t notesOffset = midiMessagesNotesOffset(evPair.second);
-        const int channel = midiMessagesChannel(evPair.second);
+        //! NOTE: the channel given, else the articulation's of the events at this timestamp; controllers
+        //! with neither (e.g. a CC curve point) follow the articulation playing at their time
+        const std::optional<int> explicitChannel = notesChannel ? notesChannel : midiMessagesChannel(evPair.second);
+        const int channel = explicitChannel.value_or(m_channel);
 
         for (const mpe::PlaybackEvent& event : evPair.second) {
             if (std::holds_alternative<mpe::NoteEvent>(event)) {
                 addNoteEvent(destination, std::get<mpe::NoteEvent>(event), notesOffset, channel, sostenutoTimeAndDurations);
             } else if (std::holds_alternative<mpe::ControllerChangeEvent>(event)) {
-                addControlChangeEvent(destination, evPair.first, std::get<mpe::ControllerChangeEvent>(event), recordState);
+                addControlChangeEvent(destination, evPair.first, std::get<mpe::ControllerChangeEvent>(event), recordState,
+                                      explicitChannel);
             }
         }
     }
@@ -252,18 +261,29 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
     const float velocityFraction = noteVelocityFraction(noteEvent);
     const float tuning = noteTuning(noteEvent, noteId);
 
+    int noteChannel = channel;
+    if (arrangementCtx.hasStart() && !arrangementCtx.hasEnd()) {
+        m_heldNoteChannels.insert_or_assign(noteId, channel);
+    } else if (!arrangementCtx.hasStart() && arrangementCtx.hasEnd()) {
+        if (auto heldIt = m_heldNoteChannels.find(noteId); heldIt != m_heldNoteChannels.end()) {
+            noteChannel = heldIt->second;
+            m_heldNoteChannels.erase(heldIt);
+        }
+    }
+
     if (arrangementCtx.hasStart()) {
         if (m_useDynamicEvents) {
             destination[arrangementCtx.actualTimestamp].emplace_back(expressionLevel(noteEvent.expressionCtx().nominalDynamicLevel));
         }
 
         destination[arrangementCtx.actualTimestamp].emplace_back(buildEvent(VstEvent::kNoteOnEvent, noteId, velocityFraction, tuning,
-                                                                            channel));
+                                                                            noteChannel));
     }
 
     if (arrangementCtx.hasEnd()) {
         const mpe::timestamp_t timestampTo = arrangementCtx.actualTimestamp + noteEvent.arrangementCtx().actualDuration;
-        destination[timestampTo].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning, channel));
+        destination[timestampTo].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning,
+                                                         noteChannel));
     }
 
     for (const auto& artPair : noteEvent.expressionCtx().articulations) {
@@ -306,18 +326,19 @@ void VstSequencer::addPedalEvent(EventSequenceMap& destination, const mpe::Artic
 }
 
 void VstSequencer::addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp,
-                                         const mpe::ControllerChangeEvent& event, bool recordState)
+                                         const mpe::ControllerChangeEvent& event, bool recordState,
+                                         const std::optional<int>& channel)
 {
     switch (event.type) {
     case mpe::ControllerChangeEvent::Modulation:
-        addParamChange(destination, timestamp, MODWHEEL_IDX, event.val);
+        addParamChange(destination, timestamp, MODWHEEL_IDX, event.val, channel);
         break;
     case mpe::ControllerChangeEvent::SustainPedalOnOff: {
         // Released on every channel it was pressed on, even if the articulation changed channel since
-        const int channel = channelAt(timestamp);
-        m_sustainDownChannels.insert(channel);
+        const int pedalChannel = channel.value_or(channelAt(timestamp));
+        m_sustainDownChannels.insert(pedalChannel);
         if (event.val.raw() >= 0.5f) {
-            addParamChangeOnChannel(destination, timestamp, SUSTAIN_IDX, event.val, channel);
+            addParamChangeOnChannel(destination, timestamp, SUSTAIN_IDX, event.val, pedalChannel);
         } else {
             for (const int downChannel : m_sustainDownChannels) {
                 addParamChangeOnChannel(destination, timestamp, SUSTAIN_IDX, event.val, downChannel);
@@ -326,11 +347,11 @@ void VstSequencer::addControlChangeEvent(EventSequenceMap& destination, const mp
         }
     } break;
     case mpe::ControllerChangeEvent::PitchBend:
-        addParamChange(destination, timestamp, PITCH_BEND_IDX, event.val);
+        addParamChange(destination, timestamp, PITCH_BEND_IDX, event.val, channel);
         break;
     case mpe::ControllerChangeEvent::ControlChange: {
         const ControlIdx controlIdx = static_cast<ControlIdx>(event.controller);
-        addParamChange(destination, timestamp, controlIdx, event.val);
+        addParamChange(destination, timestamp, controlIdx, event.val, channel);
         if (recordState) {
             m_controllerStates[controlIdx].insert_or_assign(timestamp, static_cast<PluginParamValue>(event.val.raw()));
         }
@@ -390,9 +411,9 @@ void VstSequencer::clearLiveEvents()
 }
 
 void VstSequencer::addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp,
-                                  const ControlIdx controlIdx, const PluginParamValue value)
+                                  const ControlIdx controlIdx, const PluginParamValue value, const std::optional<int>& channel)
 {
-    addParamChangeOnChannel(destination, timestamp, controlIdx, value, channelAt(timestamp));
+    addParamChangeOnChannel(destination, timestamp, controlIdx, value, channel.value_or(channelAt(timestamp)));
 }
 
 void VstSequencer::addParamChangeOnChannel(EventSequenceMap& destination, const mpe::timestamp_t timestamp,
@@ -516,15 +537,16 @@ mpe::timestamp_t VstSequencer::midiMessagesNotesOffset(const mpe::PlaybackEventL
     return 0;
 }
 
-int VstSequencer::midiMessagesChannel(const mpe::PlaybackEventList& events) const
+//! NOTE: nullopt when there's no articulation event among them
+std::optional<int> VstSequencer::midiMessagesChannel(const mpe::PlaybackEventList& events) const
 {
     for (const mpe::PlaybackEvent& event : events) {
-        if (const auto* midiEvent = std::get_if<mpe::MidiMessagesEvent>(&event); midiEvent && midiEvent->channel >= 0) {
-            return midiEvent->channel;
+        if (const auto* midiEvent = std::get_if<mpe::MidiMessagesEvent>(&event)) {
+            return midiEvent->channel >= 0 ? midiEvent->channel : m_channel;
         }
     }
 
-    return m_channel;
+    return std::nullopt;
 }
 
 void VstSequencer::updateChannelTimeline(const mpe::PlaybackEventsMap& events)
