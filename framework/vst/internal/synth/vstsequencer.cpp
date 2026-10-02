@@ -104,15 +104,49 @@ void VstSequencer::updateOffStreamEvents(const mpe::PlaybackEventsMap& events)
             }
         }
 
-        addPlaybackEvents(m_offStreamEvents, offStreamEvents, false /*recordState*/);
-        addMidiMessagesEvents(m_offStreamEvents, offStreamEvents, false /*recordState*/);
-        updateOffSequenceIterator();
+        addLiveNoteAndControllerEvents(offStreamEvents);
         return;
     }
 
     addPlaybackEvents(m_offStreamEvents, events, false /*recordState*/);
     addMidiMessagesEvents(m_offStreamEvents, events, false /*recordState*/);
     updateOffSequenceIterator();
+}
+
+//! NOTE: the off stream is only played when stopped: while playing, what is meant to sound right away (notes and
+//! controllers played on a MIDI keyboard) is sent live instead. Only if everything is immediate: a note with a
+//! fixed duration (e.g. clicked in the score) would need its note-off later, and is left out like before. The
+//! expression level, keyswitches and note delay of what is played live are left out too, not to change those
+//! of the score
+void VstSequencer::addLiveNoteAndControllerEvents(const mpe::PlaybackEventsMap& events)
+{
+    if (events.empty()) {
+        return;
+    }
+
+    // Played right away: without the articulation's note delay (see midiMessagesNotesOffset), which would
+    // move the notes later - and its keyswitches aren't sent anyway
+    mpe::PlaybackEventsMap immediateEvents;
+    for (const auto& [timestamp, eventList] : events) {
+        for (const mpe::PlaybackEvent& event : eventList) {
+            if (!std::holds_alternative<mpe::MidiMessagesEvent>(event)) {
+                immediateEvents[timestamp].push_back(event);
+            }
+        }
+    }
+
+    EventSequenceMap sequences;
+    addPlaybackEvents(sequences, immediateEvents, false /*recordState*/);
+
+    if (sequences.empty() || sequences.size() > 1 || sequences.begin()->first != audio::msecs_t(0)) {
+        return;
+    }
+
+    for (const EventType& event : sequences.begin()->second) {
+        if (std::holds_alternative<VstEvent>(event) || std::holds_alternative<ParamChangeEvent>(event)) {
+            m_liveEvents.push_back(event);
+        }
+    }
 }
 
 muse::audio::gain_t VstSequencer::currentGain() const

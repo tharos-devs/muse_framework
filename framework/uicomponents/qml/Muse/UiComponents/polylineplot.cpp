@@ -1356,8 +1356,9 @@ void PolylinePlot::updateCursor()
 {
     const bool interactive = m_hoveredOnLine || m_pressed || (m_pressedPointIndex >= 0);
 
+    // The default arrow, set explicitly so that it wins over the cursor of what's below (e.g. the score)
     if (interactive) {
-        setCursor(Qt::CrossCursor);
+        setCursor(Qt::ArrowCursor);
     } else {
         unsetCursor();
     }
@@ -1379,6 +1380,11 @@ void PolylinePlot::resetGestureState()
     updateCursor();
     updateActivePoint();
     update();
+}
+
+void PolylinePlot::setPointValueEditEnabled(bool enabled)
+{
+    m_pointValueEditEnabled = enabled;
 }
 
 void PolylinePlot::geometryChange(const QRectF& newG, const QRectF& oldG)
@@ -1688,6 +1694,17 @@ void PolylinePlot::mousePressEvent(QMouseEvent* e)
     resetGestureState();
 
     e->accept();
+
+    if (onPoint && m_pointValueEditEnabled && (e->modifiers() & Qt::ControlModifier)) {
+        // Shown selected, like a plain click on it
+        if (m_selectedPointsEnabled) {
+            m_selectedPointsIndices.insert(pointIndex);
+            update();
+        }
+        emit pointValueEditRequested(pointIndex, e->position());
+        return;
+    }
+
     updateCursor();
 
     m_pressed = true;

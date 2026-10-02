@@ -39,8 +39,8 @@ public:
     //! Keyswitch note-offs are returned separately, so they can be sent a little later than their note-ons
     void midiStateBefore(const audio::msecs_t position, EventSequence& onEvents, EventSequence& offEvents) const;
 
-    //! NOTE: MIDI CCs received live (off-stream) while playing, to send right away - the off stream itself
-    //! is only played when stopped. Each one also overrides its controller's main stream values from there
+    //! NOTE: notes and MIDI CCs received live (off-stream) while playing, to send right away - the off stream itself
+    //! is only played when stopped. Each CC also overrides its controller's main stream values from there
     //! on (a CC being recorded replaces the existing curve), until the main stream is updated again
     EventSequence takeLiveEvents();
     void clearLiveEvents();
@@ -59,6 +59,7 @@ private:
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event,
                                bool recordState);
     void addLiveControlChange(const mpe::ControllerChangeEvent& event);
+    void addLiveNoteAndControllerEvents(const mpe::PlaybackEventsMap& events);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                         const PluginParamValue value);
     void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta);

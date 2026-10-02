@@ -210,6 +210,10 @@ public:
     using ValueMapping = std::function<qreal (qreal)>;
     void setValueMapping(ValueMapping yToValue, ValueMapping valueToY);
 
+    //! NOTE: off by default: Ctrl+click (Cmd+click on macOS) on a point then emits pointValueEditRequested
+    //! instead of starting a drag
+    void setPointValueEditEnabled(bool enabled);
+
     void geometryChange(const QRectF& newG, const QRectF& oldG) override;
     void paint(QPainter* painter) override;
 
@@ -231,6 +235,8 @@ signals:
     void pointRemoved(int index, bool completed);
     //! NOTE: value is the new SegmentBend::value of the segment starting at point segmentIndex
     void segmentBendMoved(int segmentIndex, qreal value, bool completed);
+    //! NOTE: Ctrl+click (Cmd+click on macOS) on a point: the model may let the user type its value. The point isn't dragged
+    void pointValueEditRequested(int index, const QPointF& positionPx);
     void dragCancelled();
     void interactionFinished();
 
@@ -327,6 +333,7 @@ private:
     QVector<SegmentBend> m_segmentBends;
     ValueMapping m_yToValue;
     ValueMapping m_valueToY;
+    bool m_pointValueEditEnabled = false;
 
     //! NOTE: the line actually drawn, bends sampled: normalized, sorted by x, each with the index (into
     //! m_colorsUnderLine) of the color under the stretch starting there
