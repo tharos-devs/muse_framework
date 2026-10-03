@@ -40,6 +40,7 @@ public:
 
     bool seek(double secs) override;
     VideoFramePtr decodeNextFrame() override;
+    VideoThumbnailPtr decodeThumbnail(double secs, double toleranceSecs, int maxWidth, int maxHeight) override;
 
 private:
     struct Impl;
