@@ -444,6 +444,8 @@ VideoFramePtr VideoDecoder::decodeNextFrame()
         return nullptr;
     }
 
+    d.thumbPositioned = false; // decodeThumbnail()'s position is lost: it seeks again next time
+
     //! NOTE A frame that can't be converted is skipped, rather than ending the stream
     while (d.receiveFrame()) {
         VideoFramePtr result = d.convertFrame(d.framePtsSecs(d.frame));

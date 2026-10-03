@@ -97,7 +97,8 @@ public:
     //! The keyframe at or before `secs` is taken as is when it's within `toleranceSecs` of it; otherwise the
     //! frames up to `secs` are decoded. Calls with increasing, close times decode forward from the previous
     //! one instead of seeking again. Meant for a decoder used for thumbnails only: it lowers the decoding
-    //! quality (invisible at that size) to decode faster, and its position is independent of decodeNextFrame().
+    //! quality (invisible at that size) to decode faster, and moves the decoding position (call seek() before
+    //! using decodeNextFrame() again).
     //! nullptr on error.
     virtual VideoThumbnailPtr decodeThumbnail(double secs, double toleranceSecs, int maxWidth, int maxHeight) = 0;
 };
