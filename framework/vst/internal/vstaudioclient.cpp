@@ -337,7 +337,10 @@ std::vector<String> VstAudioClient::eventInputBusNames() const
 
     for (int32_t busIndex = 0; busIndex < busCount; ++busIndex) {
         BusInfo busInfo;
-        component->getBusInfo(BusMediaType::kEvent, BusDirection::kInput, busIndex, busInfo);
+        if (component->getBusInfo(BusMediaType::kEvent, BusDirection::kInput, busIndex, busInfo) != Steinberg::kResultOk) {
+            result.push_back(String());
+            continue;
+        }
         result.push_back(String(reinterpret_cast<const char16_t*>(busInfo.name)));
     }
 
@@ -357,8 +360,10 @@ void VstAudioClient::setEventInputBus(int busIndex)
 
     flushSound();
 
-    //! NOTE A bus may only be (de)activated while the plugin is inactive
+    //! NOTE A bus may only be (de)activated while the plugin is inactive - the note-offs flushSound() just queued
+    //! for the old bus are processed first, while it's still active
     const bool wasActive = m_isActive;
+    m_needUpdateState = m_isActive;
     disableActivity();
 
     //! NOTE The first bus stays active (it's the plugin's default one)

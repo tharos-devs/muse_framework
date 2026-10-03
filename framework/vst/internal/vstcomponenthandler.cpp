@@ -83,11 +83,12 @@ Steinberg::tresult VstComponentHandler::endEdit(Steinberg::Vst::ParamID /*id*/)
     return Steinberg::kResultOk;
 }
 
-Steinberg::tresult VstComponentHandler::restartComponent(Steinberg::int32 /*flags*/)
+Steinberg::tresult VstComponentHandler::restartComponent(Steinberg::int32 flags)
 {
     //! NOTE: some plugins (e.g. Kontakt loading an instrument) only report a state change this way - neither
     //! endEdit() nor setDirty(): without a rescan, the project would save their previous state
-    if (!m_advancedHandler->suppressNotify()) {
+    static constexpr Steinberg::int32 STATE_CHANGE_FLAGS = Steinberg::Vst::kReloadComponent | Steinberg::Vst::kParamValuesChanged;
+    if ((flags & STATE_CHANGE_FLAGS) && !m_advancedHandler->suppressNotify()) {
         m_paramsChangedNotify.notify();
     }
 

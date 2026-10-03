@@ -53,24 +53,28 @@ private:
     void updateMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics) override;
     void updateOffStreamEvents(const mpe::PlaybackEventsMap& events) override;
 
-    using SostenutoTimeAndDurations = std::vector<mpe::TimestampAndDuration>;
+    struct SostenutoTimeAndDuration {
+        mpe::timestamp_t timestamp = 0;
+        mpe::duration_t duration = 0;
+        int channel = 0; // of the note it belongs to: the pedal is released where it was pressed
+    };
+    using SostenutoTimeAndDurations = std::vector<SostenutoTimeAndDuration>;
 
     void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events, bool recordState,
                            const std::optional<int>& notesChannel = std::nullopt);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicAutomationLayers& layers);
     void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::timestamp_t notesOffset, const int channel,
                       SostenutoTimeAndDurations& sostenutoTimeAndDurations);
-    void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
+    void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta, const int channel);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event,
                                bool recordState, const std::optional<int>& channel);
     void addLiveControlChange(const mpe::ControllerChangeEvent& event);
     void addLiveNoteAndControllerEvents(const mpe::PlaybackEventsMap& events);
-    void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
-                        const PluginParamValue value, const std::optional<int>& channel = std::nullopt);
     void addParamChangeOnChannel(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                                  const PluginParamValue value, const int channel);
-    void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta);
-    static mpe::timestamp_t midiMessagesNotesOffset(const mpe::PlaybackEventList& events);
+    void addPitchCurve(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, const mpe::ArticulationMeta& artMeta,
+                       const int channel);
+    static const mpe::MidiMessagesEvent* midiMessagesEventFor(const mpe::PlaybackEventList& events, const mpe::NoteEvent& noteEvent);
     std::optional<int> midiMessagesChannel(const mpe::PlaybackEventList& events) const;
     void updateChannelTimeline(const mpe::PlaybackEventsMap& events);
     int channelAt(const mpe::timestamp_t timestamp) const;
@@ -100,9 +104,12 @@ private:
     //! NOTE: the channel of the articulation played from each timestamp on (main stream): CC curves, sustain
     //! and pitch bend go to the channel of the articulation playing at that time, or else to the track's
     std::map<mpe::timestamp_t, int> m_channelTimeline;
+    //! NOTE: when each channel change of the timeline is sent (its keyswitch may be sent ahead of the notes)
+    std::map<mpe::timestamp_t, mpe::timestamp_t> m_channelChangeSendTimes;
 
     //! NOTE: while building events: the channels the sustain pedal is down on, to release it on all of them
     std::set<int> m_sustainDownChannels;
+    std::set<int> m_liveSustainDownChannels; // the same for the off-stream / live events (e.g. a MIDI keyboard's pedal)
 
     //! NOTE: the channel each key held on a MIDI keyboard was played on (a note-on with no end yet), so that
     //! its note-off goes there too, even if the articulation (or the selected chord) changed in between
