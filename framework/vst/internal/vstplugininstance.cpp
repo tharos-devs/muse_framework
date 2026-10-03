@@ -95,7 +95,13 @@ VstPluginInstance::VstPluginInstance(const muse::audio::AudioResourceId& resourc
     m_id = ++s_lastId;
 
     m_componentHandlerPtr->pluginParamsChanged().onNotify(this, [this]() {
+        // Notifications in a row (e.g. several restartComponent()) make a single rescan: the state can be big
+        if (m_rescanQueued.exchange(true)) {
+            return;
+        }
+
         Async::call(this, [this]() {
+            m_rescanQueued = false;
             rescanParams();
         }, threadSecurer()->mainThreadId());
     });

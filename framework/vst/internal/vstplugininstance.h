@@ -90,6 +90,7 @@ private:
     VstMemoryStream m_componentStateBuffer;
     VstMemoryStream m_controllerStateBuffer;
     mutable async::Channel<muse::audio::AudioUnitConfig> m_pluginSettingsChanges;
+    std::atomic_bool m_rescanQueued = false;
 
     std::atomic_bool m_isLoaded = false;
     async::Notification m_loadingCompleted;
