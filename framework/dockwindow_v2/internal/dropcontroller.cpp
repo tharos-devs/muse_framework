@@ -458,29 +458,39 @@ muse::dock::Location DropController::resolveDropLocation(const DockBase* hovered
     }
 
     QRect geometry = hoveredDock->frameGeometry();
-    Location dockLocation = hoveredDock->location();
+    //! NOTE: where it actually is: a panel may have been moved to another side than its default one
+    Location dockLocation = currentPage()->actualLocation(hoveredDock);
 
-    qreal frameEnd = geometry.bottom();
+    //! NOTE: the thirds of the hovered dock itself, wherever it starts in the window
+    qreal frameStart = geometry.top();
+    qreal frameSize = geometry.height();
     qreal mousePos = localPos.y();
     Location beginDropLocation = Location::Top;
     Location endDropLocation = Location::Bottom;
 
     if (dockLocation == Location::Top || dockLocation == Location::Bottom) {
+        frameStart = geometry.left();
+        frameSize = geometry.width();
         mousePos = localPos.x();
-        frameEnd = geometry.right();
         beginDropLocation = Location::Left;
         endDropLocation = Location::Right;
     }
 
-    if (mousePos <= frameEnd / 3) {
+    const qreal relativePos = mousePos - frameStart;
+
+    if (relativePos < 0) {
+        return Location::Undefined;
+    }
+
+    if (relativePos <= frameSize / 3) {
         return beginDropLocation;
     }
 
-    if (mousePos <= frameEnd / 1.5) {
+    if (relativePos <= frameSize / 1.5) {
         return Location::Center;
     }
 
-    if (mousePos <= frameEnd) {
+    if (relativePos <= frameSize) {
         return endDropLocation;
     }
 
