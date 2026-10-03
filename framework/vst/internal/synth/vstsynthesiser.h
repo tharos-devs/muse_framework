@@ -21,6 +21,7 @@
  */
 #pragma once
 
+#include <atomic>
 #include <memory>
 
 #include "audio/engine/internal/synthesizers/abstractsynthesizer.h"
@@ -68,6 +69,7 @@ public:
 
 private:
     void initSequencer();
+    void updateDeactivationCountdown(const VstSequencer::EventSequenceMap& sequences, const muse::audio::samples_t samplesPerChannel);
 
     void toggleVolumeGain(const bool isActive);
     audio::samples_t processSequence(const VstSequencer::EventSequence& sequence, const audio::samples_t samples, float* buffer);
@@ -88,6 +90,10 @@ private:
     audio::TimePosition m_currentPosition;
 
     bool m_midiStateChasePending = false;
+
+    static constexpr double DEACTIVATION_DELAY_SECS = 1.0;
+    //! NOTE: samples left before the plugin is deactivated after stopping (0 = none pending)
+    std::atomic<int64_t> m_deactivationCountdown = 0;
     VstSequencer::EventSequence m_pendingChaseOffEvents;
 };
 

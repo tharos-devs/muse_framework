@@ -224,7 +224,21 @@ void VstSynthesiser::setMode(const muse::audio::ProcessMode mode)
     }
     toggleVolumeGain(isActive);
     m_vstAudioClient->setIsPlaying(isActive);
-    m_vstAudioClient->setIsActive(isActive);
+
+    if (isActive) {
+        m_deactivationCountdown = 0;
+        m_vstAudioClient->setIsActive(true);
+    } else {
+        //! NOTE: the plugin keeps processing (silence) a little after stopping, before being deactivated:
+        //! its tails (reverb, release) end naturally instead of being cut, and its own displays (e.g. Kontakt's
+        //! MIDI activity light) can fall back to rest - they freeze in their last state once deactivated
+        m_vstAudioClient->flushSound();
+        m_deactivationCountdown = m_outputSpec.sampleRate > 0 ? static_cast<int64_t>(m_outputSpec.sampleRate * DEACTIVATION_DELAY_SECS)
+                                  : 0;
+        if (m_deactivationCountdown == 0) {
+            m_vstAudioClient->setIsActive(false);
+        }
+    }
 
     if (mode == ProcessMode::PlayingOffline) {
         m_vstAudioClient->setProcessMode(VstProcessMode::kOffline);
@@ -275,6 +289,8 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
     VstSequencer::EventSequenceMap sequences = m_sequencer.movePlaybackForward(nextMsecs);
     const bool active = m_sequencer.isActive();
 
+    updateDeactivationCountdown(sequences, samplesPerChannel);
+
     if (active) {
         applyMidiStateChase(sequences);
 
@@ -310,6 +326,29 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
     }
 
     return processedSamples;
+}
+
+void VstSynthesiser::updateDeactivationCountdown(const VstSequencer::EventSequenceMap& sequences, const samples_t samplesPerChannel)
+{
+    if (m_deactivationCountdown <= 0) {
+        return;
+    }
+
+    // Something played in the meantime (e.g. a note clicked): stays active, as after any audition
+    const bool hasEvents = std::any_of(sequences.cbegin(), sequences.cend(), [](const auto& pair) {
+        return !pair.second.empty();
+    });
+
+    if (hasEvents) {
+        m_deactivationCountdown = 0;
+        return;
+    }
+
+    m_deactivationCountdown -= static_cast<int64_t>(samplesPerChannel);
+    if (m_deactivationCountdown <= 0) {
+        m_deactivationCountdown = 0;
+        m_vstAudioClient->setIsActive(false);
+    }
 }
 
 //! NOTE: re-sends the articulation (keyswitch/CC) that should be active at the start position,
