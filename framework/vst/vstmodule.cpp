@@ -68,6 +68,7 @@ void VSTModule::registerExports()
     globalIoc()->registerExport<IVstConfiguration>(moduleName(), m_configuration);
     globalIoc()->registerExport<IVstModulesRepository>(moduleName(), m_pluginModulesRepo);
     globalIoc()->registerExport<IVstInstancesRegister>(moduleName(), m_pluginInstancesRegister);
+    globalIoc()->registerExport<IVstPluginStateProvider>(moduleName(), m_pluginInstancesRegister);
 }
 
 void VSTModule::resolveImports()

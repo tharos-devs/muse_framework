@@ -108,6 +108,32 @@ IVstPluginInstancePtr VstInstancesRegister::instanceById(const VstPluginInstance
     return nullptr;
 }
 
+static std::optional<AudioUnitConfig> stateOf(const IVstPluginInstancePtr& instance)
+{
+    if (!instance || !instance->isLoaded()) {
+        return std::nullopt;
+    }
+
+    return instance->refreshConfigNow();
+}
+
+std::optional<AudioUnitConfig> VstInstancesRegister::instrumentPluginState(const AudioResourceId& resourceId, const TrackId trackId) const
+{
+    return stateOf(instrumentPlugin(resourceId, trackId));
+}
+
+std::optional<AudioUnitConfig> VstInstancesRegister::fxPluginState(const AudioResourceId& resourceId, const TrackId trackId,
+                                                                   const AudioFxChainOrder chainOrder) const
+{
+    return stateOf(fxPlugin(resourceId, trackId, chainOrder));
+}
+
+std::optional<AudioUnitConfig> VstInstancesRegister::masterFxPluginState(const AudioResourceId& resourceId,
+                                                                         const AudioFxChainOrder chainOrder) const
+{
+    return stateOf(masterFxPlugin(resourceId, chainOrder));
+}
+
 IVstPluginInstancePtr VstInstancesRegister::instrumentPlugin(const muse::audio::AudioResourceId& resourceId,
                                                              const muse::audio::TrackId trackId) const
 {

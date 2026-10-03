@@ -26,12 +26,22 @@
 #include <mutex>
 
 #include "../ivstinstancesregister.h"
+#include "../ivstpluginstateprovider.h"
 #include "async/asyncable.h"
 
 namespace muse::vst {
-class VstInstancesRegister : public IVstInstancesRegister, public async::Asyncable
+class VstInstancesRegister : public IVstInstancesRegister, public IVstPluginStateProvider, public async::Asyncable
 {
 public:
+    // IVstPluginStateProvider
+    std::optional<muse::audio::AudioUnitConfig> instrumentPluginState(const muse::audio::AudioResourceId& resourceId,
+                                                                      const muse::audio::TrackId trackId) const override;
+    std::optional<muse::audio::AudioUnitConfig> fxPluginState(const muse::audio::AudioResourceId& resourceId,
+                                                              const muse::audio::TrackId trackId,
+                                                              const muse::audio::AudioFxChainOrder chainOrder) const override;
+    std::optional<muse::audio::AudioUnitConfig> masterFxPluginState(const muse::audio::AudioResourceId& resourceId,
+                                                                    const muse::audio::AudioFxChainOrder chainOrder) const override;
+
     // make
     IVstPluginInstancePtr makeAndRegisterInstrPlugin(const muse::audio::AudioResourceId& resourceId,
                                                      const muse::audio::TrackId trackId) override;

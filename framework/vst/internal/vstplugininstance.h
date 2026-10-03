@@ -65,6 +65,7 @@ public:
 
     void updatePluginConfig(const muse::audio::AudioUnitConfig& config) override;
     void refreshConfig() override;
+    std::optional<muse::audio::AudioUnitConfig> refreshConfigNow() override;
 
     void load();
 
@@ -76,7 +77,7 @@ public:
 
 private:
     void syncControllerToComponentState();
-    void rescanParams();
+    std::optional<muse::audio::AudioUnitConfig> rescanParams();
     void setPluginConfig(const muse::audio::AudioUnitConfig& config);
 
     VstPluginInstanceId m_id = 0;

@@ -21,6 +21,8 @@
  */
 #pragma once
 
+#include <optional>
+
 #include "global/async/notification.h"
 
 #include "vsttypes.h"
@@ -47,6 +49,8 @@ public:
 
     virtual void updatePluginConfig(const muse::audio::AudioUnitConfig& config) = 0;
     virtual void refreshConfig() = 0;
+    //! NOTE: like refreshConfig(), also returning the config read (nullopt if it couldn't be read)
+    virtual std::optional<muse::audio::AudioUnitConfig> refreshConfigNow() = 0;
     virtual async::Channel<muse::audio::AudioUnitConfig> pluginSettingsChanged() const = 0;
 };
 }

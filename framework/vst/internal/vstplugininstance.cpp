@@ -250,24 +250,24 @@ void VstPluginInstance::syncControllerToComponentState()
     }
 }
 
-void VstPluginInstance::rescanParams()
+std::optional<muse::audio::AudioUnitConfig> VstPluginInstance::rescanParams()
 {
     ONLY_MAIN_THREAD(threadSecurer);
 
     if (!m_isLoaded) {
-        return;
+        return std::nullopt;
     }
 
     if (!m_pluginProvider) {
         LOGE() << "Plugin provider is not initialized";
-        return;
+        return std::nullopt;
     }
 
     PluginComponentPtr component = m_pluginProvider->component();
     PluginControllerPtr controller = m_pluginProvider->controller();
 
     if (!controller || !component) {
-        return;
+        return std::nullopt;
     }
 
     m_componentStateBuffer.seek(0, Steinberg::IBStream::kIBSeekSet, nullptr);
@@ -276,7 +276,7 @@ void VstPluginInstance::rescanParams()
     Steinberg::tresult res = component->getState(&m_componentStateBuffer);
     if (res != Steinberg::kResultOk && res != Steinberg::kNotImplemented) {
         LOGW() << "Component state scan failed: " << m_resourceId;
-        return;
+        return std::nullopt;
     }
 
     m_controllerStateBuffer.seek(0, Steinberg::IBStream::kIBSeekSet, nullptr);
@@ -285,7 +285,7 @@ void VstPluginInstance::rescanParams()
     res = controller->getState(&m_controllerStateBuffer);
     if (res != Steinberg::kResultOk && res != Steinberg::kNotImplemented) {
         LOGW() << "Controller state scan failed: " << m_resourceId;
-        return;
+        return std::nullopt;
     }
 
     muse::audio::AudioUnitConfig updatedConfig;
@@ -299,6 +299,8 @@ void VstPluginInstance::rescanParams()
     }
 
     m_pluginSettingsChanges.send(updatedConfig);
+
+    return updatedConfig;
 }
 
 void VstPluginInstance::setPluginConfig(const audio::AudioUnitConfig& config)
@@ -422,6 +424,13 @@ void VstPluginInstance::refreshConfig()
     ONLY_MAIN_THREAD(threadSecurer);
 
     rescanParams();
+}
+
+std::optional<muse::audio::AudioUnitConfig> VstPluginInstance::refreshConfigNow()
+{
+    ONLY_MAIN_THREAD(threadSecurer);
+
+    return rescanParams();
 }
 
 bool VstPluginInstance::isLoaded() const

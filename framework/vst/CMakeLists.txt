@@ -26,6 +26,7 @@ target_sources(muse_vst PRIVATE
     ivstmodulesrepository.h
     ivstconfiguration.h
     ivstinstancesregister.h
+    ivstpluginstateprovider.h
     ivstplugininstance.h
     vsterrors.h
     vstpluginattrs.h
