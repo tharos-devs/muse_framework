@@ -42,6 +42,17 @@ struct VideoDecoder::Impl {
     //! NOTE Frames already decoded by seek(), returned first by decodeNextFrame()
     std::deque<VideoFramePtr> queue;
 
+    //! NOTE decodeThumbnail()'s own position: the last frame shown at or before the previous target,
+    //! and the frame decoded after it (if any). Swapped with `frame` rather than copied.
+    SwsContext* thumbSws = nullptr;
+    AVFrame* thumbPrev = nullptr;
+    AVFrame* thumbNext = nullptr;
+    bool thumbPositioned = false;
+    bool thumbPrevValid = false;
+    bool thumbNextValid = false;
+    double thumbPrevPts = 0.0;
+    double thumbNextPts = 0.0;
+
     double framePtsSecs(const AVFrame* f) const
     {
         int64_t ts = f->best_effort_timestamp;
@@ -158,6 +169,46 @@ struct VideoDecoder::Impl {
         return result;
     }
 
+    VideoThumbnailPtr convertThumbnail(AVFrame* src, double ptsSecs, int maxWidth, int maxHeight)
+    {
+        if (src->width <= 0 || src->height <= 0 || maxWidth <= 0 || maxHeight <= 0) {
+            return nullptr;
+        }
+
+        // Fit in maxWidth x maxHeight, keeping the aspect ratio (of the pixels too)
+        double aspect = static_cast<double>(src->width) / src->height;
+        if (src->sample_aspect_ratio.num > 0 && src->sample_aspect_ratio.den > 0) {
+            aspect *= av_q2d(src->sample_aspect_ratio);
+        }
+
+        int width = maxWidth;
+        int height = static_cast<int>(std::lround(maxWidth / aspect));
+        if (height > maxHeight) {
+            height = maxHeight;
+            width = static_cast<int>(std::lround(maxHeight * aspect));
+        }
+        width = std::max(1, width);
+        height = std::max(1, height);
+
+        thumbSws = ff->sws_getCachedContext(thumbSws, src->width, src->height, static_cast<AVPixelFormat>(src->format),
+                                            width, height, AV_PIX_FMT_RGBA, SWS_AREA, nullptr, nullptr, nullptr);
+        if (!thumbSws) {
+            return nullptr;
+        }
+
+        auto result = std::make_shared<VideoThumbnail>();
+        result->ptsSecs = ptsSecs;
+        result->width = width;
+        result->height = height;
+        result->rgba.resize(static_cast<size_t>(width) * height * 4);
+
+        uint8_t* dst[4] = { result->rgba.data(), nullptr, nullptr, nullptr };
+        int dstStrides[4] = { width * 4, 0, 0, 0 };
+        ff->sws_scale(thumbSws, src->data, src->linesize, 0, src->height, dst, dstStrides);
+
+        return result;
+    }
+
     void closeAll()
     {
         if (!ff) {
@@ -168,6 +219,19 @@ struct VideoDecoder::Impl {
             ff->sws_freeContext(sws);
             sws = nullptr;
         }
+        if (thumbSws) {
+            ff->sws_freeContext(thumbSws);
+            thumbSws = nullptr;
+        }
+        if (thumbPrev) {
+            ff->av_frame_free(&thumbPrev);
+        }
+        if (thumbNext) {
+            ff->av_frame_free(&thumbNext);
+        }
+        thumbPositioned = false;
+        thumbPrevValid = false;
+        thumbNextValid = false;
         if (frame) {
             ff->av_frame_free(&frame);
         }
@@ -309,6 +373,7 @@ bool VideoDecoder::seek(double secs)
     }
 
     d.queue.clear();
+    d.thumbPositioned = false;
 
     secs = std::max(0.0, secs);
     const int64_t target = static_cast<int64_t>(std::floor((secs + d.startSecs) / av_q2d(d.stream->time_base)));
@@ -389,4 +454,83 @@ VideoFramePtr VideoDecoder::decodeNextFrame()
     }
 
     return nullptr;
+}
+
+VideoThumbnailPtr VideoDecoder::decodeThumbnail(double secs, double toleranceSecs, int maxWidth, int maxHeight)
+{
+    Impl& d = *m_impl;
+    if (!d.format || !d.codec) {
+        return nullptr;
+    }
+
+    if (!d.thumbPrev) {
+        d.thumbPrev = d.ff->av_frame_alloc();
+        d.thumbNext = d.ff->av_frame_alloc();
+        if (!d.thumbPrev || !d.thumbNext) {
+            return nullptr;
+        }
+
+        //! NOTE Skipping the deblocking filter makes decoding noticeably faster; its artifacts don't
+        //! show once scaled down
+        d.codec->skip_loop_filter = AVDISCARD_ALL;
+    }
+
+    // A little slack for rounding in the timestamps
+    const double epsilon = 0.001;
+    //! NOTE Decoding forward up to this far beats seeking back to a keyframe and decoding from there
+    const double forwardReachSecs = 2.0;
+
+    secs = std::max(0.0, secs);
+
+    const bool canDecodeForward = d.thumbPositioned && d.thumbPrevValid
+                                  && secs >= d.thumbPrevPts - epsilon && secs - d.thumbPrevPts <= forwardReachSecs;
+
+    bool justSeeked = false;
+    if (!canDecodeForward) {
+        const int64_t target = static_cast<int64_t>(std::floor((secs + d.startSecs) / av_q2d(d.stream->time_base)));
+        if (d.ff->av_seek_frame(d.format, d.streamIndex, target, AVSEEK_FLAG_BACKWARD) < 0) {
+            LOGW() << "thumbnail seek failed at " << secs << " s";
+            return nullptr;
+        }
+
+        d.ff->avcodec_flush_buffers(d.codec);
+        d.demuxEnded = false;
+        d.queue.clear(); // decodeNextFrame()'s position is lost anyway
+        d.thumbPositioned = true;
+        d.thumbPrevValid = false;
+        d.thumbNextValid = false;
+        justSeeked = true;
+    }
+
+    while (true) {
+        if (!d.thumbNextValid) {
+            if (!d.receiveFrame()) {
+                break; // end of the stream: the last frame is shown
+            }
+            std::swap(d.frame, d.thumbNext);
+            d.thumbNextPts = d.framePtsSecs(d.thumbNext);
+            d.thumbNextValid = true;
+        }
+
+        if (d.thumbNextPts > secs + epsilon && d.thumbPrevValid) {
+            break; // thumbPrev is the frame shown at secs
+        }
+
+        std::swap(d.thumbPrev, d.thumbNext);
+        d.thumbPrevPts = d.thumbNextPts;
+        d.thumbPrevValid = true;
+        d.thumbNextValid = false;
+
+        //! NOTE Right after a seek, thumbPrev is the keyframe at or before secs: good enough if close
+        if (justSeeked && secs - d.thumbPrevPts <= toleranceSecs) {
+            break;
+        }
+        justSeeked = false;
+    }
+
+    if (!d.thumbPrevValid) {
+        return nullptr;
+    }
+
+    return d.convertThumbnail(d.thumbPrev, d.thumbPrevPts, maxWidth, maxHeight);
 }

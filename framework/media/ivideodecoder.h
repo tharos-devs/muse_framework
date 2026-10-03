@@ -65,6 +65,16 @@ struct VideoFrame {
 
 using VideoFramePtr = std::shared_ptr<const VideoFrame>;
 
+//! NOTE A small picture (for thumbnails), 8-bit RGBA, 4 bytes per pixel, rows not padded
+struct VideoThumbnail {
+    double ptsSecs = 0.0;
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> rgba;
+};
+
+using VideoThumbnailPtr = std::shared_ptr<const VideoThumbnail>;
+
 //! NOTE Not thread-safe: meant to be driven from a single (worker) thread
 class IVideoDecoder
 {
@@ -82,6 +92,14 @@ public:
 
     //! NOTE nullptr at the end of the stream or on error
     virtual VideoFramePtr decodeNextFrame() = 0;
+
+    //! NOTE The frame shown at `secs`, scaled down to fit maxWidth x maxHeight (keeping its aspect ratio).
+    //! The keyframe at or before `secs` is taken as is when it's within `toleranceSecs` of it; otherwise the
+    //! frames up to `secs` are decoded. Calls with increasing, close times decode forward from the previous
+    //! one instead of seeking again. Meant for a decoder used for thumbnails only: it lowers the decoding
+    //! quality (invisible at that size) to decode faster, and its position is independent of decodeNextFrame().
+    //! nullptr on error.
+    virtual VideoThumbnailPtr decodeThumbnail(double secs, double toleranceSecs, int maxWidth, int maxHeight) = 0;
 };
 
 using IVideoDecoderPtr = std::shared_ptr<IVideoDecoder>;
