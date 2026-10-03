@@ -179,6 +179,27 @@ void DockPanelView::setGroupName(const QString& name)
     emit groupNameChanged();
 }
 
+QString DockPanelView::sideGroupName() const
+{
+    return m_sideGroupName;
+}
+
+void DockPanelView::setSideGroupName(const QString& name)
+{
+    if (m_sideGroupName == name) {
+        return;
+    }
+
+    m_sideGroupName = name;
+    emit sideGroupNameChanged();
+}
+
+QString DockPanelView::groupNameAt(Location location) const
+{
+    const bool isSideLocation = location == Location::Left || location == Location::Right;
+    return isSideLocation && !m_sideGroupName.isEmpty() ? m_sideGroupName : m_groupName;
+}
+
 void DockPanelView::componentComplete()
 {
     DockBase::componentComplete();
@@ -268,7 +289,7 @@ void DockPanelView::setToolbarComponent(QQmlComponent* component)
     emit toolbarComponentChanged();
 }
 
-bool DockPanelView::isTabAllowed(const DockPanelView* tab) const
+bool DockPanelView::isTabAllowed(const DockPanelView* tab, Location location) const
 {
     IF_ASSERT_FAILED(tab) {
         return false;
@@ -286,20 +307,22 @@ bool DockPanelView::isTabAllowed(const DockPanelView* tab) const
         return false;
     }
 
-    if (m_groupName.isEmpty() || tab->m_groupName.isEmpty()) {
+    //! NOTE: both in the group they have where this panel is
+    const QString groupName = groupNameAt(location);
+    if (groupName.isEmpty()) {
         return false;
     }
 
-    return m_groupName == tab->m_groupName;
+    return groupName == tab->groupNameAt(location);
 }
 
-void DockPanelView::addPanelAsTab(DockPanelView* tab)
+void DockPanelView::addPanelAsTab(DockPanelView* tab, Location location)
 {
     IF_ASSERT_FAILED(tab && dockWidget()) {
         return;
     }
 
-    if (!isTabAllowed(tab)) {
+    if (!isTabAllowed(tab, location)) {
         return;
     }
 

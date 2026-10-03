@@ -38,6 +38,9 @@ class DockPanelView : public DockBase
     Q_OBJECT
 
     Q_PROPERTY(QString groupName READ groupName WRITE setGroupName NOTIFY groupNameChanged)
+    //! The group used instead of groupName where the panel goes at the left or right (e.g. a panel tabbed with the
+    //! bottom panels, but that may also go with the side panels); empty: groupName everywhere
+    Q_PROPERTY(QString sideGroupName READ sideGroupName WRITE setSideGroupName NOTIFY sideGroupNameChanged)
     Q_PROPERTY(
         muse::uicomponents::AbstractMenuModel
         * contextMenuModel READ contextMenuModel WRITE setContextMenuModel NOTIFY contextMenuModelChanged)
@@ -51,22 +54,27 @@ public:
     ~DockPanelView() override;
 
     QString groupName() const;
+    QString sideGroupName() const;
+    QString groupNameAt(Location location) const;
     uicomponents::AbstractMenuModel* contextMenuModel() const;
     QQmlComponent* titleBar() const;
     QQmlComponent* toolbarComponent() const;
 
-    bool isTabAllowed(const DockPanelView* tab) const;
-    void addPanelAsTab(DockPanelView* tab);
+    //! location: where this panel is actually docked (see DockPageView::actualLocation())
+    bool isTabAllowed(const DockPanelView* tab, Location location) const;
+    void addPanelAsTab(DockPanelView* tab, Location location);
     void setCurrentTabIndex(int index);
 
 public slots:
     void setGroupName(const QString& name);
+    void setSideGroupName(const QString& name);
     void setContextMenuModel(uicomponents::AbstractMenuModel* model);
     void setTitleBar(QQmlComponent* titleBar);
     void setToolbarComponent(QQmlComponent* component);
 
 signals:
     void groupNameChanged();
+    void sideGroupNameChanged();
     void contextMenuModelChanged();
     void titleBarChanged();
     void toolbarComponentChanged();
@@ -77,6 +85,7 @@ private:
     void componentComplete() override;
 
     QString m_groupName;
+    QString m_sideGroupName;
 
     class DockPanelMenuModel;
     DockPanelMenuModel* m_menuModel = nullptr;

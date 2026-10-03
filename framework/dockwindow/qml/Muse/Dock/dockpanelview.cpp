@@ -178,6 +178,21 @@ void DockPanelView::setGroupName(const QString& name)
     emit groupNameChanged();
 }
 
+QString DockPanelView::sideGroupName() const
+{
+    return m_sideGroupName;
+}
+
+void DockPanelView::setSideGroupName(const QString& name)
+{
+    if (m_sideGroupName == name) {
+        return;
+    }
+
+    m_sideGroupName = name;
+    emit sideGroupNameChanged();
+}
+
 void DockPanelView::componentComplete()
 {
     DockBase::componentComplete();
