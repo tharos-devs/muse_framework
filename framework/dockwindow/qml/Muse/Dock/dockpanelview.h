@@ -38,6 +38,8 @@ class DockPanelView : public DockBase
     Q_OBJECT
 
     Q_PROPERTY(QString groupName READ groupName WRITE setGroupName NOTIFY groupNameChanged)
+    //! NOTE: only used by dockwindow_v2 (the panel then goes with these panels at the left or right)
+    Q_PROPERTY(QString sideGroupName READ sideGroupName WRITE setSideGroupName NOTIFY sideGroupNameChanged)
     Q_PROPERTY(
         muse::uicomponents::AbstractMenuModel
         * contextMenuModel READ contextMenuModel WRITE setContextMenuModel NOTIFY contextMenuModelChanged)
@@ -51,6 +53,7 @@ public:
     ~DockPanelView() override;
 
     QString groupName() const;
+    QString sideGroupName() const;
     uicomponents::AbstractMenuModel* contextMenuModel() const;
     QQmlComponent* titleBar() const;
     QQmlComponent* toolbarComponent() const;
@@ -61,12 +64,14 @@ public:
 
 public slots:
     void setGroupName(const QString& name);
+    void setSideGroupName(const QString& name);
     void setContextMenuModel(uicomponents::AbstractMenuModel* model);
     void setTitleBar(QQmlComponent* titleBar);
     void setToolbarComponent(QQmlComponent* component);
 
 signals:
     void groupNameChanged();
+    void sideGroupNameChanged();
     void contextMenuModelChanged();
     void titleBarChanged();
     void toolbarComponentChanged();
@@ -77,6 +82,7 @@ private:
     void componentComplete() override;
 
     QString m_groupName;
+    QString m_sideGroupName;
 
     class DockPanelMenuModel;
     DockPanelMenuModel* m_menuModel = nullptr;

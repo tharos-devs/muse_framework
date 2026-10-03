@@ -189,7 +189,7 @@ QList<DockPanelView*> DockPageView::findPanelsForDropping(const DockPanelView* p
             continue;
         }
 
-        if (destinationPanel->isTabAllowed(panel)) {
+        if (destinationPanel->isTabAllowed(panel, actualLocation(destinationPanel))) {
             result << destinationPanel;
         }
     }
@@ -200,8 +200,8 @@ QList<DockPanelView*> DockPageView::findPanelsForDropping(const DockPanelView* p
 DockPanelView* DockPageView::findPanelForTab(const DockPanelView* tab) const
 {
     for (DockPanelView* destinationPanel: panels()) {
-        if (destinationPanel->isTabAllowed(tab)
-            && actualLocation(destinationPanel) == tab->location()) {
+        const Location destinationLocation = actualLocation(destinationPanel);
+        if (destinationLocation == tab->location() && destinationPanel->isTabAllowed(tab, destinationLocation)) {
             return destinationPanel;
         }
     }
@@ -288,9 +288,16 @@ void DockPageView::setDockOpen(const QString& dockName, bool open)
         return;
     }
 
+    //! NOTE: a panel that also goes at the side (see sideGroupName) may have been closed on another side than its
+    //! default one: back where it was then (KDDockWidgets keeps that place), not tabbed with its default siblings
+    if (!panel->sideGroupName().isEmpty() && panel->dockedMainWindow()) {
+        panel->open();
+        return;
+    }
+
     DockPanelView* destinationPanel = findPanelForTab(panel);
     if (destinationPanel) {
-        destinationPanel->addPanelAsTab(panel);
+        destinationPanel->addPanelAsTab(panel, actualLocation(destinationPanel));
     } else {
         panel->open();
     }

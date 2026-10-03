@@ -101,6 +101,9 @@ public:
     QList<DockPanelView*> findPanelsForDropping(const DockPanelView* panel) const;
     DockPanelView* findPanelForTab(const DockPanelView* tab) const;
 
+    //! Where the dock actually is now (its location() is only where it goes by default)
+    Location actualLocation(const DockBase* dock) const;
+
     bool isDockOpen(const QString& dockName) const;
     void toggleDock(const QString& dockName);
     void setDockOpen(const QString& dockName, bool open);
@@ -136,8 +139,6 @@ signals:
 
 private:
     void componentComplete() override;
-
-    Location actualLocation(const DockBase* dock) const;
 
     void reorderSections();
     void doReorderSections();

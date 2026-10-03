@@ -152,7 +152,7 @@ private:
     void addDock(DockBase* dock, Location location = Location::Left, const DockBase* relativeTo = nullptr);
     void addDockToDefaultLocation(DockBase* dock);
     void ensureHoldersHaveDockedLocation(const DockPageView* page);
-    void addPanelAsTab(DockPanelView* panel, DockPanelView* destinationPanel);
+    void addPanelAsTab(DockPanelView* panel, DockPanelView* destinationPanel, Location destinationLocation);
     void registerDock(DockBase* dock);
 
     void handleUnknownDock(const DockPageView* page, DockBase* unknownDock);

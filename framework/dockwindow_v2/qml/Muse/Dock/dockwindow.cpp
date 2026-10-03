@@ -712,7 +712,7 @@ void DockWindow::loadPanels(const DockPageView* page)
 
     for (DockPanelView* panel : page->panels()) {
         if (DockPanelView* destinationPanel = page->findPanelForTab(panel)) {
-            addPanelAsTab(panel, destinationPanel);
+            addPanelAsTab(panel, destinationPanel, page->actualLocation(destinationPanel));
             continue;
         }
 
@@ -791,12 +791,12 @@ void DockWindow::ensureHoldersHaveDockedLocation(const DockPageView* page)
     }
 }
 
-void DockWindow::addPanelAsTab(DockPanelView* panel, DockPanelView* destinationPanel)
+void DockWindow::addPanelAsTab(DockPanelView* panel, DockPanelView* destinationPanel, Location destinationLocation)
 {
     registerDock(panel);
 
     if (panel->defaultVisibility()) {
-        destinationPanel->addPanelAsTab(panel);
+        destinationPanel->addPanelAsTab(panel, destinationLocation);
         destinationPanel->setCurrentTabIndex(0);
     }
 }
@@ -826,7 +826,7 @@ void DockWindow::handleUnknownDock(const DockPageView* page, DockBase* unknownDo
     }
 
     if (DockPanelView* destinationPanel = page->findPanelForTab(unknownPanel)) {
-        addPanelAsTab(unknownPanel, destinationPanel);
+        addPanelAsTab(unknownPanel, destinationPanel, page->actualLocation(destinationPanel));
         return;
     }
 
