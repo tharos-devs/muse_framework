@@ -122,7 +122,7 @@ public:
 
     QRect frameGeometry() const;
 
-    bool isInSameFrame(const DockBase* other) const;
+    Q_INVOKABLE bool isInSameFrame(muse::dock::DockBase* other) const;
     void setFramePanelOrder(int order);
 
     Q_INVOKABLE bool isOpen() const;
