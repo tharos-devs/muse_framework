@@ -37,6 +37,9 @@ FocusScope {
     id: root
 
     property int icon: IconCode.NONE
+    //! NOTE: text drawn right after the icon, e.g. "=" after a note for a tempo
+    property string iconSuffix: ""
+    property font iconFont: ui.theme.iconsFont
     property string text: ""
     //! NOTE: when >= 0, the text always takes exactly this width (cut off, without ellipsis, if longer),
     //! so the button keeps the same size whatever text it shows
@@ -162,12 +165,25 @@ FocusScope {
                 anchors.centerIn: parent
                 spacing: 8
 
-                StyledIconLabel {
+                Row {
                     Layout.alignment: Qt.AlignVCenter
-                    iconCode: root.icon
-                    font: ui.theme.iconsFont
-                    color: ui.theme.fontPrimaryColor
-                    visible: !isEmpty
+                    spacing: 1
+                    visible: root.icon !== IconCode.NONE
+
+                    StyledIconLabel {
+                        id: iconLabel
+                        anchors.verticalCenter: parent.verticalCenter
+                        iconCode: root.icon
+                        font: root.iconFont
+                        color: ui.theme.fontPrimaryColor
+                    }
+
+                    StyledTextLabel {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.iconSuffix
+                        font: ui.theme.bodyBoldFont
+                        visible: !isEmpty
+                    }
                 }
 
                 StyledTextLabel {
