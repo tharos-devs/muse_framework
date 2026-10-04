@@ -28,6 +28,7 @@
 #include <QGuiApplication>
 #include <QMetaProperty>
 #include <QMetaType>
+#include <QPointer>
 #include <QQmlEngine>
 #include <QUrl>
 #include <QWidget>
@@ -354,14 +355,36 @@ static QString filterToString(const std::vector<std::string>& filter)
     return result.join(";;");
 }
 
+//! NOTE On Windows, a native file dialog without a parent is owned by the focus window: when it's a dialog
+//! being closed (e.g. the one asking where to save), the file dialog is never shown and reports a cancel
+static void setFileDialogOwner(QFileDialog* dlg, QWindow* owner)
+{
+#ifdef Q_OS_WIN
+    if (!owner) {
+        return;
+    }
+
+    dlg->winId(); // creates the window handle
+    if (QWindow* window = dlg->windowHandle()) {
+        window->setTransientParent(owner);
+    }
+#else
+    UNUSED(dlg);
+    UNUSED(owner);
+#endif
+}
+
 #endif
 
 async::Promise<io::path_t> Interactive::selectOpeningFile(const std::string& title, const io::path_t& dir,
                                                           const std::vector<std::string>& filter)
 {
 #ifndef Q_OS_LINUX
-    return async::make_promise<io::path_t>([title, dir, filter](auto resolve, auto reject) {
+    QPointer<QWindow> owner = mainWindow() ? mainWindow()->qWindow() : nullptr;
+
+    return async::make_promise<io::path_t>([title, dir, filter, owner](auto resolve, auto reject) {
         QFileDialog* dlg = new QFileDialog(nullptr, QString::fromStdString(title), dir.toQString(), filterToString(filter));
+        setFileDialogOwner(dlg, owner);
 
         dlg->setFileMode(QFileDialog::ExistingFile);
 
@@ -465,8 +488,11 @@ async::Promise<io::path_t> Interactive::selectSavingFile(const std::string& titl
                                                          const std::vector<std::string>& filter, bool confirmOverwrite)
 {
 #ifndef Q_OS_LINUX
-    return async::make_promise<io::path_t>([title, dir, filter, confirmOverwrite](auto resolve, auto reject) {
+    QPointer<QWindow> owner = mainWindow() ? mainWindow()->qWindow() : nullptr;
+
+    return async::make_promise<io::path_t>([title, dir, filter, confirmOverwrite, owner](auto resolve, auto reject) {
         QFileDialog* dlg = new QFileDialog(nullptr, QString::fromStdString(title), dir.toQString(), filterToString(filter));
+        setFileDialogOwner(dlg, owner);
 
         dlg->setAcceptMode(QFileDialog::AcceptSave);
         dlg->setFileMode(QFileDialog::AnyFile);
