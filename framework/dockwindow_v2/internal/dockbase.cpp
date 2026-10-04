@@ -596,7 +596,7 @@ QRect DockBase::frameGeometry() const
     return QRect();
 }
 
-bool DockBase::isInSameFrame(const DockBase* other) const
+bool DockBase::isInSameFrame(DockBase* other) const
 {
     IF_ASSERT_FAILED(other) {
         return false;
