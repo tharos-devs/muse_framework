@@ -356,7 +356,8 @@ static QString filterToString(const std::vector<std::string>& filter)
 }
 
 //! NOTE On Windows, a native file dialog without a parent is owned by the focus window: when it's a dialog
-//! being closed (e.g. the one asking where to save), the file dialog is never shown and reports a cancel
+//! being closed (e.g. the one asking where to save), the file dialog is never shown and reports a cancel.
+//! The closing dialog has already left the stack, so topWindow() is the one below it
 static void setFileDialogOwner(QFileDialog* dlg, QWindow* owner)
 {
 #ifdef Q_OS_WIN
@@ -380,7 +381,7 @@ async::Promise<io::path_t> Interactive::selectOpeningFile(const std::string& tit
                                                           const std::vector<std::string>& filter)
 {
 #ifndef Q_OS_LINUX
-    QPointer<QWindow> owner = mainWindow() ? mainWindow()->qWindow() : nullptr;
+    QPointer<QWindow> owner = topWindow();
 
     return async::make_promise<io::path_t>([title, dir, filter, owner](auto resolve, auto reject) {
         QFileDialog* dlg = new QFileDialog(nullptr, QString::fromStdString(title), dir.toQString(), filterToString(filter));
@@ -488,7 +489,7 @@ async::Promise<io::path_t> Interactive::selectSavingFile(const std::string& titl
                                                          const std::vector<std::string>& filter, bool confirmOverwrite)
 {
 #ifndef Q_OS_LINUX
-    QPointer<QWindow> owner = mainWindow() ? mainWindow()->qWindow() : nullptr;
+    QPointer<QWindow> owner = topWindow();
 
     return async::make_promise<io::path_t>([title, dir, filter, confirmOverwrite, owner](auto resolve, auto reject) {
         QFileDialog* dlg = new QFileDialog(nullptr, QString::fromStdString(title), dir.toQString(), filterToString(filter));
