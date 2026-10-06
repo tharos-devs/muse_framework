@@ -70,6 +70,8 @@ qt_add_qml_module(muse_uicomponents_qml
         itemmultiselectionmodel.h
         menuitem.cpp
         menuitem.h
+        panelzoom.cpp
+        panelzoom.h
         menuview.cpp
         menuview.h
         polylineplot.cpp
@@ -102,6 +104,8 @@ qt_add_qml_module(muse_uicomponents_qml
         validators/intinputvalidator.h
         widgetview.cpp
         widgetview.h
+        zoomablemenumodel.cpp
+        zoomablemenumodel.h
         windowview.cpp
         windowview.h
 
@@ -172,6 +176,7 @@ qt_add_qml_module(muse_uicomponents_qml
         TextInputField.qml
         TimeInputField.qml
         ToggleButton.qml
+        ZoomContainer.qml
         Utils.mjs
         ValueAdjustControl.qml
         ValueList.qml

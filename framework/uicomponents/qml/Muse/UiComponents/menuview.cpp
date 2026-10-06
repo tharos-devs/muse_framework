@@ -110,7 +110,9 @@ void MenuView::updateGeometry()
         return;
     }
 
-    const QPointF parentTopLeft = parent->mapToGlobal(QPoint(0, 0));
+    //! NOTE: the parent's rect on screen, not its own size: it may be scaled (e.g. a zoomed panel's content)
+    const QPointF parentTopLeft = parent->mapToGlobal(QPointF(0, 0));
+    const QSizeF parentSize = globalSize(parent);
 
     if (m_globalPos.isNull()) {
         m_globalPos = parentTopLeft;
@@ -121,7 +123,7 @@ void MenuView::updateGeometry()
 
     //! NOTE: should be after resolving anchor geometry
     //! because we can move out of the screen
-    m_globalPos += m_localPos;
+    m_globalPos += parent->mapToGlobal(m_localPos) - parentTopLeft;
 
     PopupPosition::Type newPopupPos = popupPosition();
     setCascadeAlign(Qt::AlignmentFlag::AlignRight);
@@ -147,7 +149,7 @@ void MenuView::updateGeometry()
 
     if (isCascade) {
         // Position submenus to the right of the parent, at the same height...
-        movePos(parentTopLeft.x() + parent->width(), m_globalPos.y() - parent->height() - viewMargins());
+        movePos(parentTopLeft.x() + parentSize.width(), m_globalPos.y() - parentSize.height() - viewMargins());
     }
 
     if (viewRect.left() < paddedAnchorRect.left()) { // The left of this menu overlaps the left of the anchor (doesn't fit)...
@@ -200,7 +202,7 @@ void MenuView::updateGeometry()
 
         if (!isSearching()) {
             // Place to the right...
-            movePos(parentTopLeft.x() + parent->width(), m_globalPos.y() - bottomOverlap);
+            movePos(parentTopLeft.x() + parentSize.width(), m_globalPos.y() - bottomOverlap);
             clampTopIfNeed();
             newPopupPos = PopupPosition::Right;
         }
