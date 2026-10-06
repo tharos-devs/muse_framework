@@ -21,12 +21,16 @@
  */
 #pragma once
 
+#include <chrono>
+#include <vector>
+
 #include "actions/actionable.h"
 
 #include "modularity/ioc.h"
 #include "actions/iactionsdispatcher.h"
 #include "rcommand/commandable.h"
 #include "rcommand/icommanddispatcher.h"
+#include "async/asyncable.h"
 #include "interactive/iinteractive.h"
 #include "interactive/iinteractiveuriregister.h"
 #include "../ivstinstancesregister.h"
@@ -34,7 +38,7 @@
 #include "types/ret.h"
 
 namespace muse::vst {
-class VstActionsController : public actions::Actionable, public rcommand::Commandable, public muse::Contextable
+class VstActionsController : public actions::Actionable, public rcommand::Commandable, public muse::Contextable, public async::Asyncable
 {
     muse::GlobalInject<IVstConfiguration> configuration;
     muse::GlobalInject<interactive::IInteractiveUriRegister> interactiveUriRegister;
@@ -56,6 +60,10 @@ public:
 
     void editorOperation(const std::string& operation, int instanceId, bool sync);
 
+    void onInstanceUnregistered(VstPluginInstanceId id, const VstPluginSlot& slot, bool clearingAll);
+    void onInstanceRegistered(VstPluginInstanceId id, const VstPluginSlot& slot);
+    void openEditorWhenLoaded(VstPluginInstanceId id);
+
     void setupUsedView();
     void useView(bool isNew);
     bool isUsedNewView() const;
@@ -65,5 +73,12 @@ public:
 private:
 
     async::Channel<actions::ActionCodeList> m_actionCheckedChanged;
+
+    //! NOTE: slots whose plugin's window was open when it was removed, until a new plugin takes them
+    struct SlotToReopen {
+        VstPluginSlot slot;
+        std::chrono::steady_clock::time_point closedAt;
+    };
+    std::vector<SlotToReopen> m_slotsToReopen;
 };
 }

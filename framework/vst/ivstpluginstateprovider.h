@@ -23,6 +23,7 @@
 
 #include <optional>
 
+#include "async/notification.h"
 #include "modularity/imoduleinterface.h"
 #include "audio/common/audiotypes.h"
 
@@ -42,5 +43,9 @@ public:
                                                                       const muse::audio::AudioFxChainOrder chainOrder) const = 0;
     virtual std::optional<muse::audio::AudioUnitConfig> masterFxPluginState(const muse::audio::AudioResourceId& resourceId,
                                                                             const muse::audio::AudioFxChainOrder chainOrder) const = 0;
+
+    //! NOTE: whether the instrument plugin's window is open (main thread)
+    virtual bool isInstrumentEditorOpened(const muse::audio::AudioResourceId& resourceId, const muse::audio::TrackId trackId) const = 0;
+    virtual async::Notification editorsOpenedChanged() const = 0;
 };
 }

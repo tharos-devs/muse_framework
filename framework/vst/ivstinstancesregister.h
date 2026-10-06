@@ -21,12 +21,25 @@
  */
 #pragma once
 
+#include <optional>
+
+#include "async/channel.h"
 #include "modularity/imoduleinterface.h"
 #include "audio/common/audiotypes.h"
 
 #include "vsttypes.h"
 
 namespace muse::vst {
+//! NOTE: where an instance plays, which a plugin replacing it takes over: a track's instrument, or an effect slot of a
+//! track (trackId -1: the master's)
+struct VstPluginSlot {
+    bool isInstrument = false;
+    muse::audio::TrackId trackId = -1;
+    muse::audio::AudioFxChainOrder chainOrder = 0;
+
+    bool operator==(const VstPluginSlot& other) const = default;
+};
+
 class IVstInstancesRegister : MODULE_GLOBAL_INTERFACE
 {
     INTERFACE_ID(IVstInstancesRegister)
@@ -76,5 +89,15 @@ public:
 
     virtual void unregisterAllInstrPlugin() = 0;
     virtual void unregisterAllFx() = 0;
+
+    //! NOTE: whether an instance's window is open (main thread), see VstActionsController::editorOperation()
+    virtual void setEditorOpened(const VstPluginInstanceId id, bool opened) = 0;
+
+    //! NOTE: sent from the thread registering/unregistering (the audio engine's), e.g. for the instances' windows to
+    //! follow (see VstActionsController::onInstanceUnregistered()). clearingAll: all the instruments or all the
+    //! effects removed at once (e.g. the project is closed), nothing replaces them
+    virtual async::Channel<VstPluginInstanceId, VstPluginSlot> instanceRegistered() const = 0;
+    virtual async::Channel<VstPluginInstanceId, VstPluginSlot, bool /*clearingAll*/> instanceUnregistered() const = 0;
+    virtual std::optional<VstPluginInstanceId> instanceIdAt(const VstPluginSlot& slot) const = 0;
 };
 }

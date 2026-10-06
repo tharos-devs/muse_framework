@@ -22,8 +22,11 @@
 
 #pragma once
 
+#include <functional>
 #include <map>
 #include <mutex>
+#include <set>
+#include <vector>
 
 #include "../ivstinstancesregister.h"
 #include "../ivstpluginstateprovider.h"
@@ -41,6 +44,8 @@ public:
                                                               const muse::audio::AudioFxChainOrder chainOrder) const override;
     std::optional<muse::audio::AudioUnitConfig> masterFxPluginState(const muse::audio::AudioResourceId& resourceId,
                                                                     const muse::audio::AudioFxChainOrder chainOrder) const override;
+    bool isInstrumentEditorOpened(const muse::audio::AudioResourceId& resourceId, const muse::audio::TrackId trackId) const override;
+    async::Notification editorsOpenedChanged() const override;
 
     // make
     IVstPluginInstancePtr makeAndRegisterInstrPlugin(const muse::audio::AudioResourceId& resourceId,
@@ -78,6 +83,12 @@ public:
 
     void unregisterAllInstrPlugin() override;
     void unregisterAllFx() override;
+
+    void setEditorOpened(const VstPluginInstanceId id, bool opened) override;
+
+    async::Channel<VstPluginInstanceId, VstPluginSlot> instanceRegistered() const override;
+    async::Channel<VstPluginInstanceId, VstPluginSlot, bool> instanceUnregistered() const override;
+    std::optional<VstPluginInstanceId> instanceIdAt(const VstPluginSlot& slot) const override;
 
 private:
     mutable std::mutex m_mutex;
@@ -118,5 +129,17 @@ private:
     };
 
     std::map<Key, IVstPluginInstancePtr> m_instances;
+
+    using SlotInstance = std::pair<VstPluginInstanceId, VstPluginSlot>;
+    static VstPluginSlot slotOf(const Key& key);
+    void registerPlugin(const Key& key, IVstPluginInstancePtr instance);
+    std::vector<SlotInstance> takeInstances(const std::function<bool(const Key&, const IVstPluginInstancePtr&)>& pred);
+    void notifyUnregistered(const std::vector<SlotInstance>& removed, bool clearingAll);
+
+    async::Channel<VstPluginInstanceId, VstPluginSlot> m_instanceRegistered;
+    async::Channel<VstPluginInstanceId, VstPluginSlot, bool> m_instanceUnregistered;
+
+    std::set<VstPluginInstanceId> m_openedEditors;
+    async::Notification m_editorsOpenedChanged;
 };
 }

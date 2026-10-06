@@ -666,6 +666,18 @@ public:
         } else {
             // the queue is no longer functioning or may even be destroyed
             if (conf::terminated) {
+                // the threads have stopped (e.g. the audio engine's, before its objects are destroyed on the main
+                // thread): remove the receiver right here, otherwise it stays registered after its destruction and
+                // this channel's destruction calls it (crash on exit)
+                for (size_t i = 0; i < m_thdatas.count(); ++i) {
+                    ThreadData* thdata = m_thdatas.at(i);
+                    if (thdata && thdata->threadId == connectThId) {
+                        if (thdata->removeReceiver(a)) {
+                            --m_enabledReceiversCount;
+                        }
+                        break;
+                    }
+                }
                 return;
             }
 

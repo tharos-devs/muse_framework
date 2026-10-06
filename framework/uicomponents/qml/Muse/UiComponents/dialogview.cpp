@@ -299,8 +299,13 @@ void DialogView::hide()
 
 void DialogView::raise()
 {
+    //! NOTE: brought back to the front with the focus, like a QWidget dialog's (see Interactive::raise())
     if (isOpened()) {
+        if (m_view->windowStates() & Qt::WindowMinimized) {
+            m_view->showNormal();
+        }
         m_view->raise();
+        m_view->requestActivate();
     }
 }
 

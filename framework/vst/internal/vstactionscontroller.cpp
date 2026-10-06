@@ -67,6 +67,16 @@ void VstActionsController::init()
             });
         }
     }
+
+    //! NOTE: received on the main thread (sent from the audio engine's)
+    instancesRegister()->instanceUnregistered().onReceive(this, [this](VstPluginInstanceId id, const VstPluginSlot& slot,
+                                                                       bool clearingAll) {
+        onInstanceUnregistered(id, slot, clearingAll);
+    });
+
+    instancesRegister()->instanceRegistered().onReceive(this, [this](VstPluginInstanceId id, const VstPluginSlot& slot) {
+        onInstanceRegistered(id, slot);
+    });
 }
 
 muse::Ret VstActionsController::fxEditor(const rcommand::Params& params)
@@ -156,11 +166,97 @@ void VstActionsController::editorOperation(const std::string& operation, int ins
 
     if (interactive()->isOpened(editorUri).val) {
         interactive()->raise(editorUri);
-    } else if (sync) {
-        interactive()->openSync(editorUri);
-    } else {
-        interactive()->open(editorUri);
+        return;
     }
+
+    //! NOTE: lets the windows' buttons show which are open (see IVstPluginStateProvider::isInstrumentEditorOpened())
+    instancesRegister()->setEditorOpened(instanceId, true);
+
+    if (sync) {
+        interactive()->openSync(editorUri);
+        instancesRegister()->setEditorOpened(instanceId, false);
+        return;
+    }
+
+    auto onClosed = [this, instanceId]() {
+        instancesRegister()->setEditorOpened(instanceId, false);
+    };
+
+    interactive()->open(editorUri).onResolve(this, [onClosed](const Val&) {
+        onClosed();
+    }).onReject(this, [onClosed](int, const std::string&) {
+        onClosed();
+    });
+}
+
+//! NOTE: a removed plugin's window is closed, whoever opened it (the Mixer, the Track list, the articulation map
+//! editor...): it would show a plugin no longer playing, about to be destroyed. Replaced by another plugin (e.g. another
+//! instrument for the track, another effect in the slot), the new one's window opens instead
+void VstActionsController::onInstanceUnregistered(VstPluginInstanceId id, const VstPluginSlot& slot, bool clearingAll)
+{
+    if (!interactive()) {
+        return;
+    }
+
+    const UriQuery editorUri = UriQuery(String(VST_EDITOR_URI).arg(id));
+    if (!interactive()->isOpened(editorUri).val) {
+        return;
+    }
+
+    interactive()->close(editorUri);
+
+    if (clearingAll) {
+        return;
+    }
+
+    //! NOTE: the new plugin may be registered before or after the old one is removed
+    if (const std::optional<VstPluginInstanceId> newId = instancesRegister()->instanceIdAt(slot)) {
+        openEditorWhenLoaded(*newId);
+        return;
+    }
+
+    m_slotsToReopen.push_back({ slot, std::chrono::steady_clock::now() });
+}
+
+void VstActionsController::onInstanceRegistered(VstPluginInstanceId id, const VstPluginSlot& slot)
+{
+    //! NOTE: a replacement comes right after; a slot left empty for a while (e.g. "No effect") is forgotten
+    static constexpr auto REOPEN_TIMEOUT = std::chrono::seconds(5);
+    const auto now = std::chrono::steady_clock::now();
+
+    bool reopen = false;
+    for (auto it = m_slotsToReopen.begin(); it != m_slotsToReopen.end();) {
+        if (now - it->closedAt > REOPEN_TIMEOUT) {
+            it = m_slotsToReopen.erase(it);
+        } else if (it->slot == slot) {
+            reopen = true;
+            it = m_slotsToReopen.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (reopen) {
+        openEditorWhenLoaded(id);
+    }
+}
+
+//! NOTE: the plugin's view can only be created once it's loaded
+void VstActionsController::openEditorWhenLoaded(VstPluginInstanceId id)
+{
+    const IVstPluginInstancePtr instance = instancesRegister()->instanceById(id);
+    if (!instance) {
+        return;
+    }
+
+    if (instance->isLoaded()) {
+        editorOperation("open", id, false);
+        return;
+    }
+
+    instance->loadingCompleted().onNotify(this, [this, id]() {
+        editorOperation("open", id, false);
+    });
 }
 
 void VstActionsController::setupUsedView()
