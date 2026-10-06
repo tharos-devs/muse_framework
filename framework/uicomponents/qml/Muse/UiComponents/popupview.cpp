@@ -337,6 +337,13 @@ void PopupView::repositionWindowIfNeed()
     m_globalPos = QPoint();
 }
 
+QSizeF PopupView::globalSize(const QQuickItem* item)
+{
+    const QPointF topLeft = item->mapToGlobal(QPointF(0, 0));
+    const QPointF bottomRight = item->mapToGlobal(QPointF(item->width(), item->height()));
+    return QSizeF(bottomRight.x() - topLeft.x(), bottomRight.y() - topLeft.y());
+}
+
 void PopupView::updateGeometry()
 {
     const QQuickItem* parent = parentItem();
@@ -344,10 +351,12 @@ void PopupView::updateGeometry()
         return;
     }
 
-    QPointF parentTopLeft = parent->mapToGlobal(QPoint(0, 0));
+    //! NOTE: the parent's rect on screen, not its own size: it may be scaled (e.g. a zoomed panel's content)
+    const QPointF parentTopLeft = parent->mapToGlobal(QPointF(0, 0));
+    const QSizeF parentSize = globalSize(parent);
 
     if (m_globalPos.isNull()) {
-        m_globalPos = parentTopLeft + m_localPos;
+        m_globalPos = parent->mapToGlobal(m_localPos);
     }
 
     QRectF anchorRect = anchorGeometry();
@@ -367,7 +376,7 @@ void PopupView::updateGeometry()
     bool canFitRight = !ignoreFit ? viewRect.right() < anchorRect.right() : true;
 
     auto moveBelow = [&]() {
-        movePos(m_globalPos.x(), parentTopLeft.y() + parent->height());
+        movePos(m_globalPos.x(), parentTopLeft.y() + parentSize.height());
         setPopupPosition(PopupPosition::Bottom);
     };
 
@@ -382,7 +391,7 @@ void PopupView::updateGeometry()
     };
 
     auto moveRight = [&]() {
-        movePos(parentTopLeft.x() + parent->width(), m_globalPos.y());
+        movePos(parentTopLeft.x() + parentSize.width(), m_globalPos.y());
         setPopupPosition(PopupPosition::Right);
     };
 
@@ -410,7 +419,7 @@ void PopupView::updateGeometry()
         moveLeft();
     } else {
         // move to the right of the parent and move to top to an area that doesn't fit
-        movePos(parentTopLeft.x() + parent->width(), m_globalPos.y() - (viewRect.bottom() - anchorRect.bottom()) + padding());
+        movePos(parentTopLeft.x() + parentSize.width(), m_globalPos.y() - (viewRect.bottom() - anchorRect.bottom()) + padding());
         setPopupPosition(PopupPosition::Right);
     }
 
@@ -446,7 +455,8 @@ void PopupView::updateContentPosition()
         return;
     }
 
-    QPointF parentTopLeft = parent->mapToGlobal(QPoint(0, 0));
+    const QPointF parentTopLeft = parent->mapToGlobal(QPointF(0, 0));
+    const QSizeF parentSize = globalSize(parent);
 
     QRect viewGeometry = this->viewGeometry();
     QPointF viewTopLeft = QPointF(viewGeometry.x(), viewGeometry.y());
@@ -455,12 +465,12 @@ void PopupView::updateContentPosition()
     if (parentTopLeft.x() < viewTopLeft.x() || parentTopLeft.x() > viewTopRight.x()) {
         setArrowX(viewGeometry.width() / 2);
     } else {
-        setArrowX(parentTopLeft.x() + (parent->width() / 2) - m_globalPos.x());
+        setArrowX(parentTopLeft.x() + (parentSize.width() / 2) - m_globalPos.x());
     }
 
     if (parentTopLeft.y() < viewTopLeft.y() || parentTopLeft.y() > viewGeometry.bottom()) {
         setArrowY(viewGeometry.height() / 2);
     } else {
-        setArrowY(parentTopLeft.y() + (parent->height() / 2) - m_globalPos.y());
+        setArrowY(parentTopLeft.y() + (parentSize.height() / 2) - m_globalPos.y());
     }
 }

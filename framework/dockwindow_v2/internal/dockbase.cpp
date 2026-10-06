@@ -22,6 +22,8 @@
 
 #include "dockbase.h"
 
+#include <cmath>
+
 #include <QRect>
 #include <QTimer>
 
@@ -594,6 +596,35 @@ QRect DockBase::frameGeometry() const
     }
 
     return QRect();
+}
+
+bool DockBase::isInSameColumn(DockBase* other) const
+{
+    IF_ASSERT_FAILED(other) {
+        return false;
+    }
+
+    KDDockWidgets::Core::Group* group = groupForDockWidget(m_dockWidget);
+    KDDockWidgets::Core::Group* otherGroup = groupForDockWidget(other->dockWidget());
+    if (!group || !otherGroup) {
+        return false;
+    }
+
+    //! NOTE: tabbed together (the tab not shown has no geometry of its own)
+    if (group == otherGroup) {
+        return true;
+    }
+
+    const QQuickItem* view = KDDockWidgets::QtQuick::asQQuickItem(group);
+    const QQuickItem* otherView = KDDockWidgets::QtQuick::asQQuickItem(otherGroup);
+    if (!view || !otherView || !view->isVisible() || !otherView->isVisible() || view->window() != otherView->window()) {
+        return false;
+    }
+
+    //! NOTE: same left edge and width
+    const QPointF pos = view->mapToScene(QPointF(0, 0));
+    const QPointF otherPos = otherView->mapToScene(QPointF(0, 0));
+    return std::abs(pos.x() - otherPos.x()) <= 1 && std::abs(view->width() - otherView->width()) <= 1;
 }
 
 bool DockBase::isInSameFrame(DockBase* other) const

@@ -138,6 +138,9 @@ signals:
     void paddingChanged(int padding);
 
 protected:
+    //! NOTE: an item's size on screen, i.e. with its ancestors' scale (e.g. a zoomed panel's content, see ZoomContainer.qml)
+    static QSizeF globalSize(const QQuickItem* item);
+
     void initView() override;
 
     void beforeOpen() override;
