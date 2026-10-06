@@ -79,6 +79,7 @@ elseif(OS_IS_MAC)
         platform/osx/osxaudiodriver.h
         platform/osx/osxdirectaudiodriver.mm
         platform/osx/osxdirectaudiodriver.h
+        platform/osx/osxoutputlatency.h
     )
         
     set_source_files_properties(

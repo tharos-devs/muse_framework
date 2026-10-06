@@ -36,6 +36,306 @@ bool VideoRemuxer::load(const FFmpegLibPaths& paths)
     return true;
 }
 
+namespace {
+//! NOTE Encodes the PCM of an input (e.g. a WAV file) with a lossless codec, on demand: next() gives the next
+//! encoded packet, its timestamps in timeBase() from the input's first sample
+class LosslessAudioEncoder
+{
+public:
+    LosslessAudioEncoder(FFmpegLibHandler& ff, AVFormatContext* in, AVStream* inStream)
+        : m_ff(ff), m_in(in), m_inStream(inStream)
+    {
+    }
+
+    ~LosslessAudioEncoder()
+    {
+        if (m_frame) {
+            m_ff.av_frame_free(&m_frame);
+        }
+        if (m_ctx) {
+            m_ff.avcodec_free_context(&m_ctx);
+        }
+    }
+
+    std::string open(IVideoRemuxer::Options::AudioEncoding encoding, int bitsPerSample, AVFormatContext* out, AVStream* outStream)
+    {
+        const AVCodecParameters* par = m_inStream->codecpar;
+
+        switch (par->codec_id) {
+        case AV_CODEC_ID_PCM_S16LE: m_inBytes = 2;
+            break;
+        case AV_CODEC_ID_PCM_S24LE: m_inBytes = 3;
+            break;
+        case AV_CODEC_ID_PCM_S32LE:
+        case AV_CODEC_ID_PCM_F32LE: m_inBytes = 4;
+            break;
+        default:
+            return "the audio to encode isn't PCM";
+        }
+        m_inFloat = par->codec_id == AV_CODEC_ID_PCM_F32LE;
+
+#if LIBAVUTIL_VERSION_MAJOR >= 58
+        m_channels = par->ch_layout.nb_channels;
+#else
+        m_channels = par->channels;
+#endif
+        if (m_channels < 1 || m_channels > 2 || par->sample_rate <= 0) {
+            return "unsupported audio channels or sample rate";
+        }
+
+        m_bits = bitsPerSample == 16 ? 16 : 24;
+
+        const bool alac = encoding == IVideoRemuxer::Options::AudioEncoding::Alac;
+        const AVCodec* codec = m_ff.avcodec_find_encoder(alac ? AV_CODEC_ID_ALAC : AV_CODEC_ID_FLAC);
+        if (!codec) {
+            return std::string("no ") + (alac ? "ALAC" : "FLAC") + " encoder";
+        }
+
+        m_ctx = m_ff.avcodec_alloc_context3(codec);
+        m_frame = m_ff.av_frame_alloc();
+        if (!m_ctx || !m_frame) {
+            return "out of memory";
+        }
+
+        //! NOTE Both take their samples in the high bits of 32 bits integers above 16 bits
+        if (alac) {
+            m_ctx->sample_fmt = m_bits == 16 ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S32P;
+        } else {
+            m_ctx->sample_fmt = m_bits == 16 ? AV_SAMPLE_FMT_S16 : AV_SAMPLE_FMT_S32;
+        }
+        m_planar = alac;
+
+        m_ctx->sample_rate = par->sample_rate;
+        m_ctx->bits_per_raw_sample = m_bits;
+        m_ctx->time_base = AVRational { 1, par->sample_rate };
+        setLayout(m_ctx);
+        if (out->oformat->flags & AVFMT_GLOBALHEADER) {
+            m_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        }
+
+        if (m_ff.avcodec_open2(m_ctx, codec, nullptr) < 0) {
+            return "unable to open the audio encoder";
+        }
+
+        if (m_ff.avcodec_parameters_from_context(outStream->codecpar, m_ctx) < 0) {
+            return "unable to set the audio stream";
+        }
+
+        return std::string();
+    }
+
+    AVRational timeBase() const
+    {
+        return m_ctx->time_base;
+    }
+
+    bool failed() const
+    {
+        return m_failed;
+    }
+
+    //! NOTE False at the end, or on failure
+    bool next(AVPacket* packet)
+    {
+        while (true) {
+            const int ret = m_ff.avcodec_receive_packet(m_ctx, packet);
+            if (ret == 0) {
+                return true;
+            }
+            if (ret != AVERROR(EAGAIN)) {
+                m_failed = ret != AVERROR_EOF;
+                return false;
+            }
+            if (!sendFrame()) {
+                return false;
+            }
+        }
+    }
+
+private:
+    void setLayout(AVCodecContext* ctx) const
+    {
+#if LIBAVUTIL_VERSION_MAJOR >= 58
+        ctx->ch_layout.order = AV_CHANNEL_ORDER_NATIVE;
+        ctx->ch_layout.nb_channels = m_channels;
+        ctx->ch_layout.u.mask = m_channels == 1 ? AV_CH_LAYOUT_MONO : AV_CH_LAYOUT_STEREO;
+#else
+        ctx->channels = m_channels;
+        ctx->channel_layout = m_channels == 1 ? AV_CH_LAYOUT_MONO : AV_CH_LAYOUT_STEREO;
+#endif
+    }
+
+    void setLayout(AVFrame* frame) const
+    {
+#if LIBAVUTIL_VERSION_MAJOR >= 58
+        frame->ch_layout.order = AV_CHANNEL_ORDER_NATIVE;
+        frame->ch_layout.nb_channels = m_channels;
+        frame->ch_layout.u.mask = m_channels == 1 ? AV_CH_LAYOUT_MONO : AV_CH_LAYOUT_STEREO;
+#else
+        frame->channels = m_channels;
+        frame->channel_layout = m_channels == 1 ? AV_CH_LAYOUT_MONO : AV_CH_LAYOUT_STEREO;
+#endif
+    }
+
+    //! NOTE Uniform in [0, 1) (xorshift64: fast, and the same output for the same input)
+    double nextRandom()
+    {
+        m_random ^= m_random << 13;
+        m_random ^= m_random >> 7;
+        m_random ^= m_random << 17;
+        return static_cast<double>(m_random >> 11) / static_cast<double>(1ULL << 53);
+    }
+
+    size_t pendingFrames() const
+    {
+        return (m_pending.size() - m_pendingStart) / static_cast<size_t>(m_channels);
+    }
+
+    //! NOTE Reads the next input packet into m_pending (samples at m_bits bits), false at the end
+    bool readInput(AVPacket* packet)
+    {
+        while (m_ff.av_read_frame(m_in, packet) >= 0) {
+            if (packet->stream_index != m_inStream->index) {
+                m_ff.av_packet_unref(packet);
+                continue;
+            }
+
+            const int count = packet->size / m_inBytes;
+            const uint8_t* data = packet->data;
+            const int32_t maxValue = (1 << (m_bits - 1)) - 1;
+            const int32_t minValue = -(1 << (m_bits - 1));
+
+            for (int i = 0; i < count; ++i, data += m_inBytes) {
+                int32_t value = 0;
+                if (m_inFloat) {
+                    float sample = 0.f;
+                    std::memcpy(&sample, data, sizeof(sample));
+                    //! NOTE Down to 16 bits, a TPDF dither (±1 LSB) turns the rounding's distortion of quiet passages
+                    //! into a constant, inaudible noise floor
+                    const double dither = m_bits == 16 ? nextRandom() - nextRandom() : 0.0;
+                    const double scaled = std::round(static_cast<double>(sample) * (1 << (m_bits - 1)) + dither);
+                    value = static_cast<int32_t>(std::clamp(scaled, static_cast<double>(minValue), static_cast<double>(maxValue)));
+                } else {
+                    // Little endian, sign extended from the top byte
+                    uint32_t raw = 0;
+                    for (int b = 0; b < m_inBytes; ++b) {
+                        raw |= static_cast<uint32_t>(data[b]) << (8 * (b + 4 - m_inBytes));
+                    }
+                    const int32_t full = static_cast<int32_t>(raw); // at 32 bits
+                    value = full >> (32 - m_bits);
+                }
+                m_pending.push_back(value);
+            }
+
+            m_ff.av_packet_unref(packet);
+            return true;
+        }
+
+        return false;
+    }
+
+    bool sendFrame()
+    {
+        const size_t frameSize = m_ctx->frame_size > 0 ? static_cast<size_t>(m_ctx->frame_size) : 4096;
+
+        AVPacket* inPacket = m_ff.av_packet_alloc();
+        while (!m_inputEnded && pendingFrames() < frameSize) {
+            if (!readInput(inPacket)) {
+                m_inputEnded = true;
+            }
+        }
+        m_ff.av_packet_free(&inPacket);
+
+        const size_t count = std::min(frameSize, pendingFrames());
+        if (count == 0) {
+            if (m_flushed) {
+                return false;
+            }
+            m_flushed = true;
+            if (m_ff.avcodec_send_frame(m_ctx, nullptr) < 0) {
+                m_failed = true;
+                return false;
+            }
+            return true;
+        }
+
+        const int bytes = m_bits == 16 ? 2 : 4;
+        const int shift = m_bits == 16 ? 0 : 32 - m_bits;
+        const size_t planes = m_planar ? static_cast<size_t>(m_channels) : 1;
+        const size_t planeSamples = m_planar ? count : count * m_channels;
+
+        m_planes.resize(planes);
+        for (size_t p = 0; p < planes; ++p) {
+            m_planes[p].resize(planeSamples * bytes);
+        }
+
+        const int32_t* src = m_pending.data() + m_pendingStart;
+        for (size_t i = 0; i < count; ++i) {
+            for (int ch = 0; ch < m_channels; ++ch) {
+                const int32_t value = src[i * m_channels + ch];
+                const size_t plane = m_planar ? static_cast<size_t>(ch) : 0;
+                const size_t index = m_planar ? i : i * m_channels + ch;
+                if (bytes == 2) {
+                    const int16_t v = static_cast<int16_t>(value);
+                    std::memcpy(m_planes[plane].data() + index * 2, &v, 2);
+                } else {
+                    const int32_t v = static_cast<int32_t>(static_cast<uint32_t>(value) << shift);
+                    std::memcpy(m_planes[plane].data() + index * 4, &v, 4);
+                }
+            }
+        }
+
+        m_pendingStart += count * m_channels;
+        if (m_pendingStart > m_pending.size() / 2) {
+            m_pending.erase(m_pending.begin(), m_pending.begin() + static_cast<std::ptrdiff_t>(m_pendingStart));
+            m_pendingStart = 0;
+        }
+
+        //! NOTE A frame without buffers of its own: the encoder copies it
+        m_ff.av_frame_unref(m_frame);
+        m_frame->format = m_ctx->sample_fmt;
+        m_frame->sample_rate = m_ctx->sample_rate;
+        m_frame->nb_samples = static_cast<int>(count);
+        setLayout(m_frame);
+        for (size_t p = 0; p < planes; ++p) {
+            m_frame->data[p] = m_planes[p].data();
+            m_frame->linesize[p] = static_cast<int>(m_planes[p].size());
+        }
+        m_frame->extended_data = m_frame->data;
+        m_frame->pts = m_samplesSent;
+        m_samplesSent += static_cast<int64_t>(count);
+
+        if (m_ff.avcodec_send_frame(m_ctx, m_frame) < 0) {
+            m_failed = true;
+            return false;
+        }
+
+        return true;
+    }
+
+    FFmpegLibHandler& m_ff;
+    AVFormatContext* m_in = nullptr;
+    AVStream* m_inStream = nullptr;
+    AVCodecContext* m_ctx = nullptr;
+    AVFrame* m_frame = nullptr;
+
+    int m_inBytes = 0;
+    bool m_inFloat = false;
+    int m_channels = 0;
+    int m_bits = 24;
+    bool m_planar = false;
+
+    std::vector<int32_t> m_pending; // interleaved, at m_bits bits
+    size_t m_pendingStart = 0;
+    std::vector<std::vector<uint8_t> > m_planes;
+    int64_t m_samplesSent = 0;
+    bool m_inputEnded = false;
+    bool m_flushed = false;
+    bool m_failed = false;
+    uint64_t m_random = 0x9E3779B97F4A7C15ULL;
+};
+}
+
 Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination,
                         const Options& options)
 {
@@ -99,9 +399,26 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
     AVStream* videoOutStream = ff.avformat_new_stream(out, nullptr);
     AVStream* audioOutStream = ff.avformat_new_stream(out, nullptr);
     if (!videoOutStream || !audioOutStream
-        || ff.avcodec_parameters_copy(videoOutStream->codecpar, videoInStream->codecpar) < 0
-        || ff.avcodec_parameters_copy(audioOutStream->codecpar, audioInStream->codecpar) < 0) {
+        || ff.avcodec_parameters_copy(videoOutStream->codecpar, videoInStream->codecpar) < 0) {
         return error("unable to create the output streams");
+    }
+
+    std::unique_ptr<LosslessAudioEncoder> audioEncoder;
+    if (options.audioEncoding == Options::AudioEncoding::Copy) {
+        if (ff.avcodec_parameters_copy(audioOutStream->codecpar, audioInStream->codecpar) < 0) {
+            return error("unable to create the output streams");
+        }
+    } else {
+        audioEncoder = std::make_unique<LosslessAudioEncoder>(ff, audioIn, audioInStream);
+        const std::string encoderError = audioEncoder->open(options.audioEncoding, options.audioBitsPerSample, out, audioOutStream);
+        if (!encoderError.empty()) {
+            return error(encoderError);
+        }
+
+        //! NOTE FLAC in MP4 is still flagged experimental by some FFmpeg versions' muxer, though standardized
+        if (options.audioEncoding == Options::AudioEncoding::Flac) {
+            out->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
+        }
     }
 
     // Let the muxer pick the tags valid for its container
@@ -114,7 +431,7 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
         videoOutStream->codecpar->codec_tag = MKTAG('h', 'v', 'c', '1');
     }
     videoOutStream->time_base = videoInStream->time_base;
-    audioOutStream->time_base = audioInStream->time_base;
+    audioOutStream->time_base = audioEncoder ? audioEncoder->timeBase() : audioInStream->time_base;
 
     if (!(out->oformat->flags & AVFMT_NOFILE) && ff.avio_open(&out->pb, destination.c_str(), AVIO_FLAG_WRITE) < 0) {
         return error("unable to create " + destination.toStdString());
@@ -132,7 +449,7 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
     }
 
     const AVRational videoTb = videoInStream->time_base;
-    const AVRational audioTb = audioInStream->time_base;
+    const AVRational audioTb = audioEncoder ? audioEncoder->timeBase() : audioInStream->time_base;
 
     auto secsToTs = [](double secs, AVRational tb) {
         return static_cast<int64_t>(std::llround(secs / av_q2d(tb)));
@@ -140,7 +457,7 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
 
     //! NOTE Output time = input time - shift. The video's time 0 is its first frame, whose timestamp may not be 0
     const int64_t videoFirst = videoInStream->start_time != AV_NOPTS_VALUE ? videoInStream->start_time : 0;
-    const int64_t audioFirst = audioInStream->start_time != AV_NOPTS_VALUE ? audioInStream->start_time : 0;
+    const int64_t audioFirst = !audioEncoder && audioInStream->start_time != AV_NOPTS_VALUE ? audioInStream->start_time : 0;
     const int64_t videoShift = videoFirst + secsToTs(options.videoStartSecs, videoTb);
     const int64_t audioShift = audioFirst + secsToTs(options.audioPrimingSecs, audioTb);
 
@@ -217,7 +534,10 @@ Ret VideoRemuxer::remux(const io::path_t& videoSource, const io::path_t& audioSo
             ff.av_packet_rescale_ts(packet, videoTb, videoOutStream->time_base);
             packet->stream_index = videoOutStream->index;
         } else {
-            if (!readNext(audioIn, audioIndex)) {
+            if (audioEncoder ? !audioEncoder->next(packet) : !readNext(audioIn, audioIndex)) {
+                if (audioEncoder && audioEncoder->failed()) {
+                    return error("unable to encode the audio");
+                }
                 audioEnded = true;
                 continue;
             }

@@ -376,6 +376,11 @@ async::Notification AudioDriverController::outputDeviceChanged() const
     return m_outputDeviceChanged;
 }
 
+double AudioDriverController::outputLatencySecs() const
+{
+    return m_audioDriver ? m_audioDriver->outputLatencySecs() : 0.0;
+}
+
 void AudioDriverController::handleOutputDeviceChange()
 {
     if (!m_audioDriver->isOpened() && !m_retryOpenDevice) {

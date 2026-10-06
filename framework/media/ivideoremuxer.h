@@ -29,8 +29,8 @@
 
 namespace muse::media {
 //! NOTE Combines the picture (best video stream) of a video file with the audio (best audio stream) of another
-//! file into a new file, without
-//! re-encoding either (the video stream is copied as is, so there's no loss and it's fast). The
+//! file into a new file, without re-encoding the picture (the video stream is copied as is, so there's no loss
+//! and it's fast). The audio is copied as is too, or encoded losslessly from PCM (see AudioEncoding). The
 //! output container is deduced from the destination's suffix. Positioning is done with timestamps,
 //! i.e. edit lists in MP4/MOV: players start exactly at the right frame, or show black meanwhile.
 class IVideoRemuxer
@@ -46,6 +46,16 @@ public:
         double durationSecs = 0.0;
         //! NOTE The audio encoder's priming (e.g. 2048 samples for AAC-LC), skipped at playback
         double audioPrimingSecs = 0.0;
+
+        //! NOTE Copy: the audio stream is copied as is. Otherwise, the audio source must be PCM (e.g. a WAV file),
+        //! encoded with that lossless codec at audioBitsPerSample (16 or 24)
+        enum class AudioEncoding {
+            Copy,
+            Alac,
+            Flac,
+        };
+        AudioEncoding audioEncoding = AudioEncoding::Copy;
+        int audioBitsPerSample = 24;
     };
 
     virtual Ret remux(const io::path_t& videoSource, const io::path_t& audioSource, const io::path_t& destination,

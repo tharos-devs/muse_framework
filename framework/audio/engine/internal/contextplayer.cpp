@@ -78,6 +78,11 @@ void ContextPlayer::forward(const TimePosition& delta)
 {
     ONLY_AUDIO_PROC_THREAD;
 
+    if (m_isOfflineRender) {
+        m_currentPosition.forward(delta);
+        return;
+    }
+
     // Check: Active
     if (m_status.val != PlaybackStatus::Running) {
         return;
@@ -133,6 +138,17 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
     }
 
     return newTime;
+}
+
+void ContextPlayer::beginOfflineRender(sample_rate_t sampleRate)
+{
+    m_isOfflineRender = true;
+    m_currentPosition = TimePosition::zero(sampleRate);
+}
+
+void ContextPlayer::endOfflineRender()
+{
+    m_isOfflineRender = false;
 }
 
 const TimePosition& ContextPlayer::currentPosition() const

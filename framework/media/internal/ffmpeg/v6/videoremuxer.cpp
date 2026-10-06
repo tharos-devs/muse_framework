@@ -22,7 +22,10 @@
 
 #include "videoremuxer.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 #include "ffmpeglibhandler.h"
 

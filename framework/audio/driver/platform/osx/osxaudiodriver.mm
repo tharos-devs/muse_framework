@@ -22,14 +22,20 @@
 
 #include "osxaudiodriver.h"
 
+#include <algorithm>
+#include <atomic>
 #include <mutex>
 
 #include <AudioToolbox/AudioToolbox.h>
+
+#include "osxoutputlatency.h"
 
 #include "translation.h"
 #include "log.h"
 
 typedef AudioDeviceID OSXAudioDeviceID;
+
+static constexpr unsigned int QUEUE_BUFFER_COUNT = 2;
 
 using namespace muse;
 using namespace muse::audio;
@@ -39,9 +45,20 @@ struct OSXAudioDriver::Data {
     AudioQueueRef audioQueue = nullptr;
     Callback callback;
 
+    //! NOTE The output latency (see IAudioDriver::outputLatencySecs()): what is queued but not played yet, measured
+    //! at each fill, then what the device adds
+    uint64_t enqueuedFrames = 0;
+    std::atomic<double> queueLatencySecs = 0.0;
+    std::atomic<double> deviceLatencySecs = 0.0;
+
     void clear()
     {
-        *this = Data();
+        format = Spec();
+        audioQueue = nullptr;
+        callback = Callback();
+        enqueuedFrames = 0;
+        queueLatencySecs = 0.0;
+        deviceLatencySecs = 0.0;
     }
 };
 
@@ -141,7 +158,7 @@ bool OSXAudioDriver::open(const Spec& spec, Spec* activeSpec)
     }
 
     // Allocate 2 audio buffers. At the same time one used for writing, one for reading
-    for (unsigned int i = 0; i < 2; ++i) {
+    for (unsigned int i = 0; i < QUEUE_BUFFER_COUNT; ++i) {
         AudioQueueBufferRef buffer;
         result = AudioQueueAllocateBuffer(m_data->audioQueue, spec.output.samplesPerChannel * audioFormat.mBytesPerFrame, &buffer);
         if (result != noErr) {
@@ -155,7 +172,10 @@ bool OSXAudioDriver::open(const Spec& spec, Spec* activeSpec)
         memset(buffer->mAudioData, 0, buffer->mAudioDataByteSize);
 
         AudioQueueEnqueueBuffer(m_data->audioQueue, buffer, 0, NULL);
+        m_data->enqueuedFrames += spec.output.samplesPerChannel;
     }
+
+    m_data->deviceLatencySecs = osxDeviceOutputLatencySecs(osxDeviceId());
 
     // start playback
     result = AudioQueueStart(m_data->audioQueue, NULL);
@@ -186,6 +206,9 @@ void OSXAudioDriver::doClose()
         AudioQueueDispose(m_data->audioQueue, true);
         m_data->audioQueue = nullptr;
     }
+
+    m_data->enqueuedFrames = 0;
+    m_data->queueLatencySecs = 0.0;
 }
 
 bool OSXAudioDriver::isOpened() const
@@ -469,9 +492,47 @@ void OSXAudioDriver::initDeviceMapListener()
 }
 
 /*static*/
-void OSXAudioDriver::OnFillBuffer(void* context, AudioQueueRef, AudioQueueBufferRef buffer)
+void OSXAudioDriver::OnFillBuffer(void* context, AudioQueueRef queue, AudioQueueBufferRef buffer)
 {
     Data* pData = (Data*)context;
     pData->callback((uint8_t*)buffer->mAudioData, buffer->mAudioDataByteSize);
     AudioQueueEnqueueBuffer(pData->audioQueue, buffer, 0, NULL);
+
+    //! NOTE The queue's time is the sample it's playing: what was just rendered is heard after the rest of the queue
+    const UInt32 bytesPerFrame = static_cast<UInt32>(sizeof(float) * pData->format.output.audioChannelCount);
+    if (bytesPerFrame == 0 || pData->format.output.sampleRate == 0) {
+        return;
+    }
+    const uint64_t bufferFrames = buffer->mAudioDataByteSize / bytesPerFrame;
+    pData->enqueuedFrames += bufferFrames;
+
+    AudioTimeStamp now = {};
+    if (AudioQueueGetCurrentTime(queue, nullptr, &now, nullptr) == noErr && (now.mFlags & kAudioTimeStampSampleTimeValid)) {
+        const double queuedFrames = static_cast<double>(pData->enqueuedFrames) - now.mSampleTime;
+
+        //! NOTE The queue's time can restart (e.g. the system moved it to another device): the count is then
+        //! re-anchored on its time, with the last latency measured (else its buffers), instead of measuring a
+        //! runaway latency. What's queued can't be much more than its buffers otherwise
+        const double sampleRate = pData->format.output.sampleRate;
+        const double maxQueuedFrames = static_cast<double>(QUEUE_BUFFER_COUNT * bufferFrames) + 0.25 * sampleRate;
+        if (queuedFrames < 0.0 || queuedFrames > maxQueuedFrames) {
+            const double previous = pData->queueLatencySecs.load();
+            const double buffersFrames = static_cast<double>(QUEUE_BUFFER_COUNT * bufferFrames);
+            const double assumedQueuedFrames = previous > 0.0 ? previous * sampleRate : buffersFrames;
+            pData->enqueuedFrames = static_cast<uint64_t>(std::max(0.0, now.mSampleTime) + assumedQueuedFrames);
+        } else {
+            //! NOTE Smoothed: the queue's time moves by the device's IO cycles
+            const double measured = queuedFrames / pData->format.output.sampleRate;
+            const double previous = pData->queueLatencySecs.load();
+            pData->queueLatencySecs = previous > 0.0 ? previous + 0.1 * (measured - previous) : measured;
+        }
+    }
+}
+
+double OSXAudioDriver::outputLatencySecs() const
+{
+    if (!m_data || m_data->queueLatencySecs.load() <= 0.0) {
+        return 0.0;
+    }
+    return m_data->queueLatencySecs.load() + m_data->deviceLatencySecs.load();
 }

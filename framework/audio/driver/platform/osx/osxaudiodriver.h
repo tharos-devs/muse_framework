@@ -61,6 +61,8 @@ public:
     std::vector<samples_t> availableOutputDeviceBufferSizes() const override;
     std::vector<sample_rate_t> availableOutputDeviceSampleRates() const override;
 
+    double outputLatencySecs() const override;
+
 private:
     static void OnFillBuffer(void* context, OpaqueAudioQueue* queue, AudioQueueBuffer* buffer);
     static void logError(const std::string message, OSStatus error);

@@ -55,6 +55,9 @@ public:
     virtual bool selectOutputDevice(const AudioDeviceID& deviceId) = 0;
     virtual async::Notification outputDeviceChanged() const = 0;
 
+    //! NOTE See IAudioDriver::outputLatencySecs()
+    virtual double outputLatencySecs() const { return 0.0; }
+
     virtual std::vector<samples_t> availableOutputDeviceBufferSizes() const = 0;
     virtual void changeBufferSize(samples_t samples) = 0;
     virtual async::Notification outputDeviceBufferSizeChanged() const = 0;
