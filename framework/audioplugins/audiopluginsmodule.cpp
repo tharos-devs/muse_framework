@@ -23,6 +23,7 @@
 
 #include "internal/audiopluginsconfiguration.h"
 #include "internal/audiopluginsloadguard.h"
+#include "internal/audiopluginsmainthreadtasks.h"
 #include "internal/knownaudiopluginsregister.h"
 #include "internal/knownaudiopluginsmigrationregister.h"
 #include "internal/audiopluginsscannerregister.h"
@@ -51,6 +52,7 @@ void AudioPluginsModule::registerExports()
     globalIoc()->registerExport<IKnownAudioPluginsRegister>(moduleName(), std::make_shared<KnownAudioPluginsRegister>());
     globalIoc()->registerExport<IAudioPluginsScannerRegister>(moduleName(), std::make_shared<AudioPluginsScannerRegister>());
     globalIoc()->registerExport<IAudioPluginsLoadGuard>(moduleName(), std::make_shared<AudioPluginsLoadGuard>());
+    globalIoc()->registerExport<IAudioPluginsMainThreadTasks>(moduleName(), std::make_shared<AudioPluginsMainThreadTasks>());
     globalIoc()->registerExport<IAudioPluginMetaReaderRegister>(moduleName(), std::make_shared<AudioPluginMetaReaderRegister>());
 }
 

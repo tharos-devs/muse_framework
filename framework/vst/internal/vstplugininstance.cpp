@@ -102,6 +102,13 @@ VstPluginInstance::VstPluginInstance(const muse::audio::AudioResourceId& resourc
 
         Async::call(this, [this]() {
             m_rescanQueued = false;
+
+            //! NOTE: before its saved state is restored, the plugin is in its default state: reading it now would
+            //! replace the project's saved state with the default one
+            if (!m_initialConfigApplied) {
+                return;
+            }
+
             rescanParams();
         }, threadSecurer()->mainThreadId());
     });
@@ -174,52 +181,70 @@ VstPluginInstanceId VstPluginInstance::id() const
  */
 void VstPluginInstance::load()
 {
-    Async::call(this, [this]() {
-        ONLY_MAIN_THREAD(threadSecurer);
+    runOnMainThread([](VstPluginInstance* self) {
+        self->doLoad();
+    });
+}
 
-        m_module = modulesRepo()->pluginModule(m_resourceId);
-        if (!m_module) {
-            modulesRepo()->addPluginModule(m_resourceId);
-            m_module = modulesRepo()->pluginModule(m_resourceId);
-        }
+void VstPluginInstance::runOnMainThread(const std::function<void(VstPluginInstance*)>& work, bool completesLoading)
+{
+    const std::weak_ptr<VstPluginInstance> weakSelf = weak_from_this();
 
-        if (!m_module) {
-            LOGE() << "Unable to find vst plugin module, resourceId: " << m_resourceId;
-            return;
-        }
-
-        const auto& factory = m_module->getFactory();
-
-        for (const ClassInfo& classInfo : factory.classInfos()) {
-            if (classInfo.category() != kVstAudioEffectClass) {
-                continue;
+    Async::call(this, [this, weakSelf, work, completesLoading]() {
+        mainThreadTasks()->enqueue(m_resourceId, [weakSelf, work]() {
+            if (const std::shared_ptr<VstPluginInstance> self = weakSelf.lock()) {
+                work(self.get());
             }
-
-            m_pluginProvider = std::make_unique<VstPluginProvider>(factory, classInfo);
-            break;
-        }
-
-        if (!m_pluginProvider) {
-            LOGE() << "Unable to load vst plugin provider";
-            return;
-        }
-
-        if (!m_pluginProvider->init()) {
-            LOGE() << "Unable to initialize vst plugin provider";
-            return;
-        }
-
-        PluginControllerPtr controller = m_pluginProvider->controller();
-        if (!controller) {
-            return;
-        }
-
-        controller->setComponentHandler(m_componentHandlerPtr);
-        syncControllerToComponentState();
-
-        m_isLoaded = true;
-        m_loadingCompleted.notify();
+        }, completesLoading);
     }, threadSecurer()->mainThreadId());
+}
+
+void VstPluginInstance::doLoad()
+{
+    ONLY_MAIN_THREAD(threadSecurer);
+
+    m_module = modulesRepo()->pluginModule(m_resourceId);
+    if (!m_module) {
+        modulesRepo()->addPluginModule(m_resourceId);
+        m_module = modulesRepo()->pluginModule(m_resourceId);
+    }
+
+    if (!m_module) {
+        LOGE() << "Unable to find vst plugin module, resourceId: " << m_resourceId;
+        return;
+    }
+
+    const auto& factory = m_module->getFactory();
+
+    for (const ClassInfo& classInfo : factory.classInfos()) {
+        if (classInfo.category() != kVstAudioEffectClass) {
+            continue;
+        }
+
+        m_pluginProvider = std::make_unique<VstPluginProvider>(factory, classInfo);
+        break;
+    }
+
+    if (!m_pluginProvider) {
+        LOGE() << "Unable to load vst plugin provider";
+        return;
+    }
+
+    if (!m_pluginProvider->init()) {
+        LOGE() << "Unable to initialize vst plugin provider";
+        return;
+    }
+
+    PluginControllerPtr controller = m_pluginProvider->controller();
+    if (!controller) {
+        return;
+    }
+
+    controller->setComponentHandler(m_componentHandlerPtr);
+    syncControllerToComponentState();
+
+    m_isLoaded = true;
+    m_loadingCompleted.notify();
 }
 
 void VstPluginInstance::syncControllerToComponentState()
@@ -414,9 +439,11 @@ void VstPluginInstance::updatePluginConfig(const audio::AudioUnitConfig& config)
 {
     ONLY_AUDIO_THREAD(threadSecurer);
 
-    Async::call(this, [this, config]() {
-        setPluginConfig(config);
-    }, threadSecurer()->mainThreadId());
+    //! NOTE: restoring a state can block for seconds (e.g. a big sample player)
+    runOnMainThread([config](VstPluginInstance* self) {
+        self->setPluginConfig(config);
+        self->m_initialConfigApplied = true;
+    }, !m_initialConfigQueued.exchange(true));
 }
 
 void VstPluginInstance::refreshConfig()

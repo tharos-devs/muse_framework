@@ -37,12 +37,15 @@ target_sources(muse_audioplugins PRIVATE
     iaudiopluginmetareader.h
     iaudiopluginmetareaderregister.h
     iaudiopluginsloadguard.h
+    iaudiopluginsmainthreadtasks.h
     iregisteraudiopluginsscenario.h
 
     internal/audiopluginsconfiguration.cpp
     internal/audiopluginsconfiguration.h
     internal/audiopluginsloadguard.cpp
     internal/audiopluginsloadguard.h
+    internal/audiopluginsmainthreadtasks.cpp
+    internal/audiopluginsmainthreadtasks.h
     internal/knownaudiopluginsregister.cpp
     internal/knownaudiopluginsregister.h
     internal/knownaudiopluginsmigrationregister.cpp

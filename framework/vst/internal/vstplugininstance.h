@@ -23,6 +23,8 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <memory>
 
 #include "../ivstplugininstance.h"
 
@@ -32,6 +34,7 @@
 #include "async/channel.h"
 #include "audio/common/iaudiothreadsecurer.h"
 #include "audio/common/audiotypes.h"
+#include "audioplugins/iaudiopluginsmainthreadtasks.h"
 
 #include "../ivstmodulesrepository.h"
 #include "../vsttypes.h"
@@ -39,10 +42,11 @@
 
 namespace muse::vst {
 class VstPluginProvider;
-class VstPluginInstance : public IVstPluginInstance, public async::Asyncable
+class VstPluginInstance : public IVstPluginInstance, public async::Asyncable, public std::enable_shared_from_this<VstPluginInstance>
 {
     muse::GlobalInject<muse::audio::IAudioThreadSecurer> threadSecurer;
     muse::GlobalInject<IVstModulesRepository> modulesRepo;
+    muse::GlobalInject<audioplugins::IAudioPluginsMainThreadTasks> mainThreadTasks;
 
 public:
     VstPluginInstance(const muse::audio::AudioResourceId& resourceId);
@@ -76,6 +80,10 @@ public:
     async::Channel<muse::audio::AudioUnitConfig> pluginSettingsChanged() const override;
 
 private:
+    void doLoad();
+    //! NOTE: runs the main thread work through IAudioPluginsMainThreadTasks (one task per event loop turn), and
+    //! only while this instance still exists: it's kept alive while the work runs
+    void runOnMainThread(const std::function<void(VstPluginInstance*)>& work, bool completesLoading = false);
     void syncControllerToComponentState();
     std::optional<muse::audio::AudioUnitConfig> rescanParams();
     void setPluginConfig(const muse::audio::AudioUnitConfig& config);
@@ -94,6 +102,10 @@ private:
     std::atomic_bool m_rescanQueued = false;
 
     std::atomic_bool m_isLoaded = false;
+    //! NOTE: the first config (the saved state, applied right after loading, see VstSynthesiser/VstFxProcessor)
+    //! completes the loading
+    std::atomic_bool m_initialConfigQueued = false;
+    std::atomic_bool m_initialConfigApplied = false;
     async::Notification m_loadingCompleted;
 };
 }
