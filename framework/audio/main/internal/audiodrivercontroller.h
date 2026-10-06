@@ -61,6 +61,8 @@ public:
     bool selectOutputDevice(const AudioDeviceID& deviceId) override;
     async::Notification outputDeviceChanged() const override;
 
+    double outputLatencySecs() const override;
+
     std::vector<samples_t> availableOutputDeviceBufferSizes() const override;
     void changeBufferSize(samples_t samples) override;
     async::Notification outputDeviceBufferSizeChanged() const override;

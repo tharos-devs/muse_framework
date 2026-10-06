@@ -39,6 +39,7 @@
 
 #include "common/audiotypes.h"
 #include "common/audioworkgroup.h"
+#include "osxoutputlatency.h"
 #include "translation.h"
 #include "log.h"
 
@@ -67,8 +68,15 @@ struct OSXDirectAudioDriver::Data {
     std::vector<ChannelBufferDetails> channelBufferOutputDetails;
     std::vector<float> outBuffer;
 
+    //! NOTE The output latency (see IAudioDriver::outputLatencySecs()): until the IO cycle's output time, measured
+    //! at each cycle, then what the device adds
+    std::atomic<double> ioLatencySecs{ 0.0 };
+    std::atomic<double> deviceLatencySecs{ 0.0 };
+
     Data& operator=(const Data& other)
     {
+        ioLatencySecs = other.ioLatencySecs.load();
+        deviceLatencySecs = other.deviceLatencySecs.load();
         format = other.format;
         procId = other.procId;
         canBeDirectlyMapped = other.canBeDirectlyMapped;
@@ -182,13 +190,27 @@ static std::optional<uint32_t> getSameRequestedSampleCount(const AudioBufferList
     return sampleCount;
 }
 
-//TODO: make use of timing parameters
+//! NOTE What was rendered in this cycle starts being played at its output time: its last sample is heard a buffer later
+static void updateIOLatency(OSXDirectAudioDriver::Data* data, const AudioTimeStamp* now, const AudioTimeStamp* outputTime,
+                            uint32_t samplesPerChannel)
+{
+    if (!now || !outputTime || !(now->mFlags & kAudioTimeStampHostTimeValid) || !(outputTime->mFlags & kAudioTimeStampHostTimeValid)
+        || outputTime->mHostTime < now->mHostTime || data->format.output.sampleRate == 0) {
+        return;
+    }
+
+    const double untilOutputSecs = static_cast<double>(AudioConvertHostTimeToNanos(outputTime->mHostTime - now->mHostTime)) / 1e9;
+    const double measured = untilOutputSecs + static_cast<double>(samplesPerChannel) / data->format.output.sampleRate;
+    const double previous = data->ioLatencySecs.load();
+    data->ioLatencySecs = previous > 0.0 ? previous + 0.1 * (measured - previous) : measured;
+}
+
 static int coreAudioIOProc(AudioObjectID /* inDevice*/,
-                           const AudioTimeStamp* /* inNow */,
+                           const AudioTimeStamp* inNow,
                            const AudioBufferList* /* inInputData */,
                            const AudioTimeStamp* /*  inInputTime */,
                            AudioBufferList* outOutputData,
-                           const AudioTimeStamp* /* inOutputTime */,
+                           const AudioTimeStamp* inOutputTime,
                            void* __nullable inClientData)
 {
     auto* data = reinterpret_cast<OSXDirectAudioDriver::Data*>(inClientData);
@@ -206,6 +228,8 @@ static int coreAudioIOProc(AudioObjectID /* inDevice*/,
     if (samplesPerChannel == 0) {
         return noErr;
     }
+
+    updateIOLatency(data, inNow, inOutputTime, samplesPerChannel);
 
     const uint32_t callbackDataStride = data->format.output.audioChannelCount;
     int dataSize = static_cast<int>(samplesPerChannel * callbackDataStride * sizeof(float));
@@ -668,6 +692,8 @@ bool OSXDirectAudioDriver::open(const Spec& spec, Spec* activeSpec)
         return false;
     }
 
+    m_data->deviceLatencySecs = osxDeviceOutputLatencySecs(*deviceId);
+
     m_audioWorkGroup = createAudioWorkgroup(*deviceId);
     m_currentWorkgroupChanged.notify();
 
@@ -1001,4 +1027,12 @@ std::optional<int> muse::audio::OSXDirectAudioDriver::getAudioDeviceId(
         return std::nullopt;
     }
     return index->first;
+}
+
+double OSXDirectAudioDriver::outputLatencySecs() const
+{
+    if (!m_data || m_data->ioLatencySecs.load() <= 0.0) {
+        return 0.0;
+    }
+    return m_data->ioLatencySecs.load() + m_data->deviceLatencySecs.load();
 }

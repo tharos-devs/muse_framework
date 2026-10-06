@@ -63,6 +63,8 @@ public:
     std::vector<samples_t> availableOutputDeviceBufferSizes() const override;
     std::vector<sample_rate_t> availableOutputDeviceSampleRates() const override;
 
+    double outputLatencySecs() const override;
+
     AudioWorkGroup getAudioWorkGroup() const override;
     async::Notification currentWorkgroupChanged() const override;
 

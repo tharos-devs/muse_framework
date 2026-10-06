@@ -1000,7 +1000,9 @@ Ret AudioContext::doSaveSoundTrack(io::IODevice& dstDevice, const SoundTrackForm
     }
 
     const secs_t totalDuration = format.duration > 0.0 ? format.duration : m_player->duration();
-    auto writer = std::make_shared<SoundTrackWriter>(dstDevice, format, totalDuration, m_mixer);
+    //! NOTE The whole output chain, as heard: the master track (its gain, fx, volume and mute) after the mixer, and
+    //! the playhead, which moves the position the automation is evaluated at along with the render
+    auto writer = std::make_shared<SoundTrackWriter>(dstDevice, format, totalDuration, m_playheadNode);
 
     std::vector<SoundTrackAudioNodePtr> soundTracks;
     for (const Track& t : m_tracks) {
@@ -1032,8 +1034,10 @@ Ret AudioContext::doSaveSoundTrack(io::IODevice& dstDevice, const SoundTrackForm
             soundTrack->setForceIncludeInExport(format.includeSoundTracks);
         }
 
+        m_player->beginOfflineRender(format.outputSpec.sampleRate);
         ret = writer->write();
-        m_mixer->setOutputSpec(outputSpec());
+        m_player->endOfflineRender();
+        m_playheadNode->setOutputSpec(outputSpec());
         setMode(ProcessMode::Idle);
         m_player->seek(TimePosition::zero(m_outputSpec.sampleRate));
 

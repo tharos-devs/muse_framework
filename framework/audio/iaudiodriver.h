@@ -68,6 +68,10 @@ public:
     virtual std::vector<sample_rate_t> availableOutputDeviceSampleRates() const = 0;
     virtual AudioDeviceList availableOutputDevices() const = 0;
     virtual async::Notification availableOutputDevicesChanged() const = 0;
+
+    //! NOTE How long after the driver's callback the last sample it rendered is heard, as measured by the driver
+    //! (its buffering and the device's own latency), 0: unknown
+    virtual double outputLatencySecs() const { return 0.0; }
 };
 using IAudioDriverPtr = std::shared_ptr<IAudioDriver>;
 }

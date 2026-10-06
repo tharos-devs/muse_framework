@@ -66,6 +66,11 @@ public:
     void forward(const TimePosition& delta) override;
     const TimePosition& currentPosition() const override;
 
+    //! NOTE An offline render (export): the position simply follows what is rendered, from the start, at the
+    //! render's sample rate (no count-in, loop, end, nor position notifications)
+    void beginOfflineRender(sample_rate_t sampleRate);
+    void endOfflineRender();
+
 private:
 
     void exec(OperationType type, const Operation& func);
@@ -117,6 +122,7 @@ private:
     async::Channel<TimeEvent> m_timeEvent;
 
     bool m_flushSoundOnSeek = true;
+    bool m_isOfflineRender = false;
     std::set<AudioSourceNodePtr> m_notYetReadyToPlayTracks;
 };
 }
