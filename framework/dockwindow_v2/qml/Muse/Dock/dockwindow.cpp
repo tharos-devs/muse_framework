@@ -778,13 +778,15 @@ void DockWindow::addDockToDefaultLocation(DockBase* dock)
 
 //! NOTE: DropController opens the holders to dock into them: one with no docked location would open floating
 //! (KDDockWidgets then refusing, or even crashing on, a drop next to it in the main window). A saved layout
-//! where they're all closed doesn't keep one, so they get their default one back
+//! where they're all closed doesn't keep one, and one may keep a wrong one (e.g. the bottom holder at the right
+//! edge: every drop at the bottom then went to the right), so they always get their default one back: a dock
+//! keeps a single place in the main window, the previous one goes away
 void DockWindow::ensureHoldersHaveDockedLocation(const DockPageView* page)
 {
     for (DockType type : { DockType::Panel, DockType::ToolBar }) {
         for (Location location : POSSIBLE_LOCATIONS) {
             DockingHolderView* holder = page->holder(type, location);
-            if (holder && !holder->isOpen() && holder->dockedMainWindow() != m_mainWindow->mainWindow()) {
+            if (holder && !holder->isOpen()) {
                 addDock(holder, location);
             }
         }
