@@ -85,7 +85,6 @@ private:
         Undefined,
         PlaybackEnded,
         CountDownEnded,
-        LoopEnded,
     };
 
     struct TimeEvent {
@@ -96,6 +95,8 @@ private:
     void onTimeEvent(const TimeEvent event);
 
     void seekAllTracks(const TimePosition& position);
+    //! NOTE From the processing thread, between two blocks (no operation exec needed)
+    void proc_seekAllTracks(const TimePosition& position);
     void flushAllTracks();
 
     using AllTracksReadyCallback = std::function<void ()>;
