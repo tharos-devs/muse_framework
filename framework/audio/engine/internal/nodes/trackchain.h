@@ -27,6 +27,7 @@
 #include "fxchain.h"
 #include "automationcontrolnode.h"
 #include "gainnode.h"
+#include "eqnode.h"
 #include "signalnode.h"
 
 namespace muse::audio {
@@ -38,7 +39,7 @@ struct TrackChainTag
 
 namespace muse::audio::engine {
 //! NOTE A typical node chain for processing a track:
-//! signalnode <- controlnode <- fxnode[] <- gainnode <- audiosource
+//! signalnode <- controlnode <- fxnode[] <- eqnode <- gainnode <- audiosource
 class TrackChain : public ChainNode<TrackChainTag>
 {
 public:
@@ -56,6 +57,9 @@ public:
 
     void setGain(GainNodePtr gainNode);
     GainNodePtr gain() const;
+
+    void setEq(EqNodePtr eqNode);
+    EqNodePtr eq() const;
 
     void setControl(AutomationControlNodePtr controlNode);
     AutomationControlNodePtr control() const;
@@ -75,6 +79,7 @@ protected:
     IAudioNodePtr m_source;
     FxChainPtr m_fxChain;
     GainNodePtr m_gain;
+    EqNodePtr m_eq;
     AutomationControlNodePtr m_control;
     SignalNodePtr m_signal;
 };
