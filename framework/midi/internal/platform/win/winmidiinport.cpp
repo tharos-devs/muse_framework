@@ -154,7 +154,10 @@ static void CALLBACK process(HMIDIIN hMidiIn, UINT wMsg, DWORD_PTR dwInstance, D
         if (hdr->dwBytesRecorded > 0) {
             uint8_t* data = reinterpret_cast<uint8_t*>(hdr->lpData);
             self->doProcessLongData(data, hdr->dwBytesRecorded, static_cast<tick_t>(dwParam2));
-            midiInAddBuffer(hMidiIn, hdr, sizeof(MIDIHDR));
+            // while closing, midiInReset() returns the buffer: added again, it couldn't be unprepared
+            if (!self->isClosing()) {
+                midiInAddBuffer(hMidiIn, hdr, sizeof(MIDIHDR));
+            }
         }
     } break;
     default:
@@ -260,6 +263,7 @@ void WinMidiInPort::disconnect()
         return;
     }
 
+    m_closing = true;
     for (const std::unique_ptr<Win::Input>& input : m_win->inputs) {
         midiInStop(input->midiIn);
         midiInReset(input->midiIn);
@@ -267,6 +271,7 @@ void WinMidiInPort::disconnect()
         midiInClose(input->midiIn);
     }
     m_win->inputs.clear();
+    m_closing = false;
 
     LOGI() << "Disconnected from " << m_deviceID;
 

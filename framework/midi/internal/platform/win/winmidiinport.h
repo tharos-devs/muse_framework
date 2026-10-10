@@ -22,7 +22,9 @@
 #ifndef MUSE_MIDI_WINMIDIINPORT_H
 #define MUSE_MIDI_WINMIDIINPORT_H
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 
 #include "async/asyncable.h"
 
@@ -53,6 +55,7 @@ public:
     // internal;
     void doProcess(uint32_t message, tick_t tick);
     void doProcessLongData(uint8_t* data, size_t size, tick_t tick);
+    bool isClosing() const { return m_closing; }
 
 private:
     Ret openDevice(const MidiDeviceID& deviceID);
@@ -67,6 +70,7 @@ private:
 
     mutable std::mutex m_devicesMutex;
     std::mutex m_processMutex;
+    std::atomic<bool> m_closing = false;
 
     async::Channel<tick_t, Event > m_eventReceived;
 };

@@ -225,12 +225,13 @@ void AlsaMidiInPort::disconnect()
         return;
     }
 
+    // the reading thread uses the sequencer until it stops
+    stop();
+
     for (const auto& [client, port] : m_alsa->sources) {
         snd_seq_disconnect_from(m_alsa->midiIn, 0, client, port);
     }
     snd_seq_close(m_alsa->midiIn);
-
-    stop();
 
     LOGD() << "Disconnected from " << m_deviceID;
 
