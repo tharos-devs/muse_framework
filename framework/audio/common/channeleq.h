@@ -82,8 +82,8 @@ inline bool bandTypeHasQ(EqBandType type)
 //! - Parametric I: a bell, Q / 2
 //! - Parametric II: a bell narrow for small boosts/cuts, widening for large ones
 //! - Shelf I: 6 dB/octave, the frequency is where it's 3 dB away from its flat side
-//! - Shelf II, III, IV: 12 dB/octave, centred on the frequency; Q steepens its flat side (II, with a slight dip
-//!   beyond the frequency), its gain side (III, with a slight bump before it), or both (IV)
+//! - Shelf II, III, IV: 12 dB/octave, centred on the frequency; Q steepens its flat side (II, with a slight
+//!   overshoot away from the gain there), its gain side (III, with a slight overshoot beyond the gain), or both (IV)
 //! - Pass I and II: 12 dB/octave, each with its own fixed shape (rounded knee), Q unused
 namespace detail {
 static constexpr double HIGH_PASS1_Q = 0.62;
@@ -197,6 +197,13 @@ inline double shelfQ(double q)
 {
     return SHELF_Q * std::pow(std::max(q, 0.01), SHELF_Q_EXPONENT);
 }
+
+//! NOTE The flat side's singularities are the zeros when boosting, the poles when cutting
+inline Biquad shelf(bool low, double frequency, double gainDb, double flatSideQ, double gainSideQ, double sampleRate)
+{
+    const bool boost = gainDb >= 0.0;
+    return secondOrderShelf(low, frequency, gainDb, boost ? flatSideQ : gainSideQ, boost ? gainSideQ : flatSideQ, sampleRate);
+}
 }
 
 inline BandFilter bandFilter(const EqBandParams& band, double sampleRate)
@@ -223,22 +230,22 @@ inline BandFilter bandFilter(const EqBandParams& band, double sampleRate)
         section = firstOrderShelf(band.type == EqBandType::LowShelf1, f, g, sampleRate);
         break;
     case EqBandType::LowShelf2:
-        section = secondOrderShelf(true, f, g, shelfQ(q), SHELF_Q, sampleRate);
+        section = shelf(true, f, g, shelfQ(q), SHELF_Q, sampleRate);
         break;
     case EqBandType::LowShelf3:
-        section = secondOrderShelf(true, f, g, SHELF_Q, shelfQ(q), sampleRate);
+        section = shelf(true, f, g, SHELF_Q, shelfQ(q), sampleRate);
         break;
     case EqBandType::LowShelf4:
-        section = secondOrderShelf(true, f, g, shelfQ(q), shelfQ(q), sampleRate);
+        section = shelf(true, f, g, shelfQ(q), shelfQ(q), sampleRate);
         break;
     case EqBandType::HighShelf2:
-        section = secondOrderShelf(false, f, g, shelfQ(q), SHELF_Q, sampleRate);
+        section = shelf(false, f, g, shelfQ(q), SHELF_Q, sampleRate);
         break;
     case EqBandType::HighShelf3:
-        section = secondOrderShelf(false, f, g, SHELF_Q, shelfQ(q), sampleRate);
+        section = shelf(false, f, g, SHELF_Q, shelfQ(q), sampleRate);
         break;
     case EqBandType::HighShelf4:
-        section = secondOrderShelf(false, f, g, shelfQ(q), shelfQ(q), sampleRate);
+        section = shelf(false, f, g, shelfQ(q), shelfQ(q), sampleRate);
         break;
     case EqBandType::HighPass1:
         section = highPass(f, HIGH_PASS1_Q, sampleRate);
