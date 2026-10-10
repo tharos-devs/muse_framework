@@ -44,7 +44,7 @@ struct Biquad {
     double a2 = 0.0;
 };
 
-static constexpr size_t MAX_BAND_SECTIONS = 3;
+static constexpr size_t MAX_BAND_SECTIONS = 1;
 
 struct BandFilter {
     std::array<Biquad, MAX_BAND_SECTIONS> sections;
@@ -67,7 +67,7 @@ inline std::vector<EqBandType> availableBandTypes(size_t bandIndex)
     return { EqBandType::Parametric1, EqBandType::Parametric2 };
 }
 
-//! NOTE Pass filters have no gain; plain shelves and steep pass filters have no Q
+//! NOTE Pass filters have no gain; neither they nor the first shelves have a Q
 inline bool bandTypeHasGain(EqBandType type)
 {
     return !isEqPassType(type);
@@ -75,31 +75,43 @@ inline bool bandTypeHasGain(EqBandType type)
 
 inline bool bandTypeHasQ(EqBandType type)
 {
-    return type != EqBandType::LowShelf1 && type != EqBandType::HighShelf1
-           && type != EqBandType::HighPass2 && type != EqBandType::LowPass2;
+    return !isEqPassType(type) && type != EqBandType::LowShelf1 && type != EqBandType::HighShelf1;
 }
 
+//! NOTE The shown Q is a musical value, each type turns it into its filter's own Q:
+//! - Parametric I: a bell, Q / 2
+//! - Parametric II: a bell narrow for small boosts/cuts, widening for large ones
+//! - Shelf I: 6 dB/octave, the frequency is where it's 3 dB away from its flat side
+//! - Shelf II, III, IV: 12 dB/octave, centred on the frequency; Q steepens its flat side (II, with a slight dip
+//!   beyond the frequency), its gain side (III, with a slight bump before it), or both (IV)
+//! - Pass I and II: 12 dB/octave, each with its own fixed shape (rounded knee), Q unused
 namespace detail {
-static constexpr double BUTTERWORTH_Q = 0.7071067811865476;
-// the two sections of a 4th order Butterworth filter
-static constexpr double BUTTERWORTH4_Q1 = 0.5411961001461970;
-static constexpr double BUTTERWORTH4_Q2 = 1.3065629648763766;
+static constexpr double HIGH_PASS1_Q = 0.62;
+static constexpr double HIGH_PASS2_Q = 0.50;
+static constexpr double LOW_PASS1_Q = 0.30;
+static constexpr double LOW_PASS2_Q = 0.53;
 
-// share of the shelf's gain given to its dip/bump, and its distance to the corner frequency
-static constexpr double SHELF_ACCENT_AMOUNT = 0.25;
-static constexpr double SHELF_ACCENT_OCTAVES = 1.0;
-static constexpr double SHELF_ACCENT_Q = 1.2;
+static constexpr double SHELF_Q = 0.52;
+static constexpr double SHELF_Q_EXPONENT = 0.19;
+
+inline double parametric2Q(double q, double gainDb)
+{
+    return std::clamp(2.98 * std::pow(q, 0.84) * std::pow(10.0, -std::abs(gainDb) / 22.0), 0.05, 40.0);
+}
 
 struct Prepared {
     double cosw = 1.0;
     double alpha = 0.0;
 };
 
+inline double safeFrequency(double frequency, double sampleRate)
+{
+    return std::clamp(frequency, 10.0, 0.45 * sampleRate);
+}
+
 inline Prepared prepare(double frequency, double q, double sampleRate)
 {
-    const double nyquistSafe = 0.45 * sampleRate;
-    const double f = std::clamp(frequency, 10.0, nyquistSafe);
-    const double w0 = 2.0 * PI * f / sampleRate;
+    const double w0 = 2.0 * PI * safeFrequency(frequency, sampleRate) / sampleRate;
     return { std::cos(w0), std::sin(w0) / (2.0 * std::max(q, 0.01)) };
 }
 
@@ -116,32 +128,6 @@ inline Biquad peaking(double frequency, double gainDb, double q, double sampleRa
                       1.0 + p.alpha / a, -2.0 * p.cosw, 1.0 - p.alpha / a);
 }
 
-inline Biquad lowShelf(double frequency, double gainDb, double q, double sampleRate)
-{
-    const Prepared p = prepare(frequency, q, sampleRate);
-    const double a = std::pow(10.0, gainDb / 40.0);
-    const double k = 2.0 * std::sqrt(a) * p.alpha;
-    return normalized(a * ((a + 1.0) - (a - 1.0) * p.cosw + k),
-                      2.0 * a * ((a - 1.0) - (a + 1.0) * p.cosw),
-                      a * ((a + 1.0) - (a - 1.0) * p.cosw - k),
-                      (a + 1.0) + (a - 1.0) * p.cosw + k,
-                      -2.0 * ((a - 1.0) + (a + 1.0) * p.cosw),
-                      (a + 1.0) + (a - 1.0) * p.cosw - k);
-}
-
-inline Biquad highShelf(double frequency, double gainDb, double q, double sampleRate)
-{
-    const Prepared p = prepare(frequency, q, sampleRate);
-    const double a = std::pow(10.0, gainDb / 40.0);
-    const double k = 2.0 * std::sqrt(a) * p.alpha;
-    return normalized(a * ((a + 1.0) + (a - 1.0) * p.cosw + k),
-                      -2.0 * a * ((a - 1.0) + (a + 1.0) * p.cosw),
-                      a * ((a + 1.0) + (a - 1.0) * p.cosw - k),
-                      (a + 1.0) - (a - 1.0) * p.cosw + k,
-                      2.0 * ((a - 1.0) - (a + 1.0) * p.cosw),
-                      (a + 1.0) - (a - 1.0) * p.cosw - k);
-}
-
 inline Biquad highPass(double frequency, double q, double sampleRate)
 {
     const Prepared p = prepare(frequency, q, sampleRate);
@@ -156,32 +142,60 @@ inline Biquad lowPass(double frequency, double q, double sampleRate)
                       1.0 + p.alpha, -2.0 * p.cosw, 1.0 - p.alpha);
 }
 
-//! NOTE Shelf II adds a dip opposite to the gain past the corner, Shelf III a bump in the gain's direction before it,
-//! Shelf IV both; Q scales how pronounced they are
-inline void addShelf(BandFilter& filter, bool low, int variant, const EqBandParams& band, double sampleRate)
+//! NOTE A first order shelf (bilinear transform), its frequency being where it's 3 dB (or half its gain, when
+//! smaller than 6 dB) away from its flat side
+inline Biquad firstOrderShelf(bool low, double frequency, double gainDb, double sampleRate)
 {
-    const double f = band.frequency;
-    const double g = band.gain;
-
-    filter.sections[filter.sectionCount++] = low ? lowShelf(f, g, BUTTERWORTH_Q, sampleRate)
-                                             : highShelf(f, g, BUTTERWORTH_Q, sampleRate);
-
-    if (variant == 1) {
-        return;
+    const double g = std::pow(10.0, gainDb / 20.0);
+    const double markDb = std::min(3.0, std::abs(gainDb) / 2.0);
+    const double t = std::pow(10.0, std::copysign(markDb, gainDb) / 20.0);
+    if (std::abs(g - t) < 1e-9 || std::abs(t - 1.0) < 1e-9) {
+        return Biquad();
     }
 
-    const double amount = SHELF_ACCENT_AMOUNT * std::clamp(static_cast<double>(band.q), 0.0, 2.4);
-    const double outside = std::pow(2.0, low ? SHELF_ACCENT_OCTAVES : -SHELF_ACCENT_OCTAVES);
+    // the pole, relative to the frequency
+    const double ratio = low ? std::sqrt((t * t - 1.0) / (g * g - t * t))
+                         : std::sqrt((g * g - t * t) / (t * t - 1.0));
+    const double wp = std::tan(PI * std::min(safeFrequency(frequency, sampleRate) * ratio, 0.45 * sampleRate) / sampleRate);
 
-    const bool dip = variant == 2 || variant == 4;
-    const bool bump = variant == 3 || variant == 4;
+    if (low) {
+        // H(s) = (s + g wp) / (s + wp)
+        const double wz = g * wp;
+        return normalized(1.0 + wz, wz - 1.0, 0.0, 1.0 + wp, wp - 1.0, 0.0);
+    }
 
-    if (dip) {
-        filter.sections[filter.sectionCount++] = peaking(f * outside, -g * amount, SHELF_ACCENT_Q, sampleRate);
+    // H(s) = (g s + wp) / (s + wp)
+    return normalized(g + wp, wp - g, 0.0, 1.0 + wp, wp - 1.0, 0.0);
+}
+
+//! NOTE A second order shelf centred on the frequency, with its own Q for its zeros and its poles (bilinear
+//! transform, prewarped at the frequency): for a low shelf, H(s) = (s² + s wz/qz + wz²) / (s² + s wp/qp + wp²),
+//! wz/wp = sqrt(gain); a high shelf is its mirror image around the frequency
+inline Biquad secondOrderShelf(bool low, double frequency, double gainDb, double qZeros, double qPoles, double sampleRate)
+{
+    const double g = std::pow(10.0, gainDb / 20.0);
+    const double wz = std::pow(g, 0.25); // relative to the frequency
+    const double wp = std::pow(g, -0.25);
+
+    // numerator and denominator: c2 s² + c1 s + c0
+    double n2 = 1.0, n1 = wz / qZeros, n0 = wz * wz;
+    double d2 = 1.0, d1 = wp / qPoles, d0 = wp * wp;
+    if (!low) {
+        // s -> 1/s
+        std::swap(n2, n0);
+        std::swap(d2, d0);
     }
-    if (bump) {
-        filter.sections[filter.sectionCount++] = peaking(f / outside, g * amount, SHELF_ACCENT_Q, sampleRate);
-    }
+
+    const double c = 1.0 / std::tan(PI * safeFrequency(frequency, sampleRate) / sampleRate);
+    const double cc = c * c;
+
+    return normalized(n2 * cc + n1 * c + n0, 2.0 * (n0 - n2 * cc), n2 * cc - n1 * c + n0,
+                      d2 * cc + d1 * c + d0, 2.0 * (d0 - d2 * cc), d2 * cc - d1 * c + d0);
+}
+
+inline double shelfQ(double q)
+{
+    return SHELF_Q * std::pow(std::max(q, 0.01), SHELF_Q_EXPONENT);
 }
 }
 
@@ -190,47 +204,53 @@ inline BandFilter bandFilter(const EqBandParams& band, double sampleRate)
     using namespace detail;
 
     BandFilter filter;
+    filter.sectionCount = 1;
+    Biquad& section = filter.sections[0];
+
     const double f = band.frequency;
     const double g = band.gain;
     const double q = band.q;
 
     switch (band.type) {
     case EqBandType::Parametric1:
-        filter.sections[filter.sectionCount++] = peaking(f, g, q, sampleRate);
+        section = peaking(f, g, q / 2.0, sampleRate);
         break;
     case EqBandType::Parametric2:
-        // narrows as the gain grows
-        filter.sections[filter.sectionCount++] = peaking(f, g, q * std::pow(2.0, std::abs(g) / 12.0), sampleRate);
+        section = peaking(f, g, parametric2Q(q, g), sampleRate);
         break;
-    case EqBandType::LowShelf1: addShelf(filter, true, 1, band, sampleRate);
+    case EqBandType::LowShelf1:
+    case EqBandType::HighShelf1:
+        section = firstOrderShelf(band.type == EqBandType::LowShelf1, f, g, sampleRate);
         break;
-    case EqBandType::LowShelf2: addShelf(filter, true, 2, band, sampleRate);
+    case EqBandType::LowShelf2:
+        section = secondOrderShelf(true, f, g, shelfQ(q), SHELF_Q, sampleRate);
         break;
-    case EqBandType::LowShelf3: addShelf(filter, true, 3, band, sampleRate);
+    case EqBandType::LowShelf3:
+        section = secondOrderShelf(true, f, g, SHELF_Q, shelfQ(q), sampleRate);
         break;
-    case EqBandType::LowShelf4: addShelf(filter, true, 4, band, sampleRate);
+    case EqBandType::LowShelf4:
+        section = secondOrderShelf(true, f, g, shelfQ(q), shelfQ(q), sampleRate);
         break;
-    case EqBandType::HighShelf1: addShelf(filter, false, 1, band, sampleRate);
+    case EqBandType::HighShelf2:
+        section = secondOrderShelf(false, f, g, shelfQ(q), SHELF_Q, sampleRate);
         break;
-    case EqBandType::HighShelf2: addShelf(filter, false, 2, band, sampleRate);
+    case EqBandType::HighShelf3:
+        section = secondOrderShelf(false, f, g, SHELF_Q, shelfQ(q), sampleRate);
         break;
-    case EqBandType::HighShelf3: addShelf(filter, false, 3, band, sampleRate);
-        break;
-    case EqBandType::HighShelf4: addShelf(filter, false, 4, band, sampleRate);
+    case EqBandType::HighShelf4:
+        section = secondOrderShelf(false, f, g, shelfQ(q), shelfQ(q), sampleRate);
         break;
     case EqBandType::HighPass1:
-        filter.sections[filter.sectionCount++] = highPass(f, q, sampleRate);
+        section = highPass(f, HIGH_PASS1_Q, sampleRate);
         break;
     case EqBandType::HighPass2:
-        filter.sections[filter.sectionCount++] = highPass(f, BUTTERWORTH4_Q1, sampleRate);
-        filter.sections[filter.sectionCount++] = highPass(f, BUTTERWORTH4_Q2, sampleRate);
+        section = highPass(f, HIGH_PASS2_Q, sampleRate);
         break;
     case EqBandType::LowPass1:
-        filter.sections[filter.sectionCount++] = lowPass(f, q, sampleRate);
+        section = lowPass(f, LOW_PASS1_Q, sampleRate);
         break;
     case EqBandType::LowPass2:
-        filter.sections[filter.sectionCount++] = lowPass(f, BUTTERWORTH4_Q1, sampleRate);
-        filter.sections[filter.sectionCount++] = lowPass(f, BUTTERWORTH4_Q2, sampleRate);
+        section = lowPass(f, LOW_PASS2_Q, sampleRate);
         break;
     }
 
