@@ -56,6 +56,10 @@ public:
     virtual bool isSecondaryWindowOpen() const { return false; }
     virtual void setSecondaryWindowOpen(bool open) { (void)open; }
     virtual async::Notification secondaryWindowOpenChanged() const { return async::Notification(); }
+
+    //! Keeps the secondary window above the main window while the application is active
+    //! (not while it's full screen nor while one of our dialogs has the focus)
+    virtual void setSecondaryWindowOnTop(bool onTop) { (void)onTop; }
 };
 }
 

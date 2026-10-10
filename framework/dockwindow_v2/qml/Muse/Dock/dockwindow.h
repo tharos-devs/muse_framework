@@ -119,6 +119,7 @@ public:
     bool isSecondaryWindowOpen() const override;
     void setSecondaryWindowOpen(bool open) override;
     async::Notification secondaryWindowOpenChanged() const override;
+    void setSecondaryWindowOnTop(bool onTop) override;
 
     QList<DockToolBarView*> topLevelToolBars(const DockPageView* page) const;
 
@@ -176,6 +177,9 @@ private:
     void notifyAboutDocksOpenStatus();
 
     void initSecondaryWindow();
+    void updateSecondaryWindowOnTop();
+    static void setStaysOnTop(QWindow* window, bool onTop);
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void applySecondaryWindowOpen(bool open);
     bool isSecondaryWindowShown() const;
     bool isSecondaryMainWindow(const KDDockWidgets::Core::MainWindow* mainWindow) const;
@@ -198,6 +202,7 @@ private:
     bool m_secondaryWindowOpen = false;
     bool m_updatingSecondaryWindowVisibility = false;
     bool m_mainWindowActivatedLast = true;
+    bool m_secondaryWindowOnTop = false;
     async::Notification m_secondaryWindowOpenChanged;
 };
 }

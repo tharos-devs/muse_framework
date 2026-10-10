@@ -564,7 +564,106 @@ void DockWindow::initSecondaryWindow()
         } else if (focusWindow && focusWindow == window()) {
             m_mainWindowActivatedLast = true;
         }
+
+        //! NOTE: e.g. a dialog was opened or closed
+        updateSecondaryWindowOnTop();
     });
+
+    connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this]() {
+        updateSecondaryWindowOnTop();
+    });
+
+    connect(m_secondaryWindow, &QWindow::windowStateChanged, this, [this]() {
+        updateSecondaryWindowOnTop();
+    });
+
+    updateSecondaryWindowOnTop();
+}
+
+void DockWindow::setSecondaryWindowOnTop(bool onTop)
+{
+    if (m_secondaryWindowOnTop == onTop) {
+        return;
+    }
+
+    m_secondaryWindowOnTop = onTop;
+
+    //! NOTE: our tool windows shown later (e.g. a panel undocked, the Master palette opened) must be kept on top too
+    if (onTop) {
+        qGuiApp->installEventFilter(this);
+    } else {
+        qGuiApp->removeEventFilter(this);
+    }
+
+    updateSecondaryWindowOnTop();
+}
+
+bool DockWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::Show) {
+        const QWindow* window = qobject_cast<QWindow*>(watched);
+        if (window && window->type() == Qt::Tool && window != m_secondaryWindow) {
+            muse::async::Async::call(this, [this]() {
+                updateSecondaryWindowOnTop();
+            });
+        }
+    }
+
+    return QQuickItem::eventFilter(watched, event);
+}
+
+//! NOTE: one of our dialogs (modal or not, e.g. a plugin window) has the focus: kept on top, the secondary window
+//! would cover it. Not our tool windows (kept on top with it, see updateSecondaryWindowOnTop()) nor tooltips
+static bool isDialogFocused(const QWindow* mainWindow, const QWindow* secondaryWindow)
+{
+    const QWindow* focusWindow = qGuiApp->focusWindow();
+    if (!focusWindow || focusWindow == mainWindow || focusWindow == secondaryWindow) {
+        return false;
+    }
+
+    const Qt::WindowType type = focusWindow->type();
+    return type != Qt::Tool && type != Qt::Popup && type != Qt::ToolTip;
+}
+
+void DockWindow::updateSecondaryWindowOnTop()
+{
+    if (!m_secondaryWindow) {
+        return;
+    }
+
+    //! NOTE: only while we're the active application (so it doesn't cover other applications),
+    //! not in full screen (its own space on macOS) nor while one of our dialogs has the focus (it would cover it)
+    const bool onTop = m_secondaryWindowOnTop
+                       && qGuiApp->applicationState() == Qt::ApplicationActive
+                       && !m_secondaryWindow->windowStates().testFlag(Qt::WindowFullScreen)
+                       && !qGuiApp->modalWindow()
+                       && !isDialogFocused(window(), m_secondaryWindow);
+
+    m_updatingSecondaryWindowVisibility = true;
+    setStaysOnTop(m_secondaryWindow, onTop);
+    m_updatingSecondaryWindowVisibility = false;
+
+    //! NOTE: after it, so they're in front of it: our tool windows (floating panels, the Master palette, popups...)
+    //! would otherwise be below it, Qt::WindowStaysOnTopHint being a higher window level than Qt::Tool (on macOS)
+    for (QWindow* window : QGuiApplication::topLevelWindows()) {
+        if (window != m_secondaryWindow && window->type() == Qt::Tool && window->isVisible()) {
+            setStaysOnTop(window, onTop);
+        }
+    }
+}
+
+void DockWindow::setStaysOnTop(QWindow* window, bool onTop)
+{
+    if (window->flags().testFlag(Qt::WindowStaysOnTopHint) == onTop) {
+        return;
+    }
+
+    //! NOTE: changing the flags of a shown window may hide it on some platforms
+    const bool visible = window->isVisible();
+    window->setFlag(Qt::WindowStaysOnTopHint, onTop);
+    if (visible && !window->isVisible()) {
+        window->setVisible(true);
+    }
 }
 
 bool DockWindow::isSecondaryMainWindow(const KDDockWidgets::Core::MainWindow* mainWindow) const
@@ -574,6 +673,11 @@ bool DockWindow::isSecondaryMainWindow(const KDDockWidgets::Core::MainWindow* ma
 
 bool DockWindow::isMainWindowInFrontAt(const QPoint& globalPos) const
 {
+    //! NOTE: then the secondary window is always in front
+    if (m_secondaryWindow && m_secondaryWindow->flags().testFlag(Qt::WindowStaysOnTopHint)) {
+        return false;
+    }
+
     const QWindow* mainWindow = window();
     return m_mainWindowActivatedLast && mainWindow && mainWindow->isVisible() && mainWindow->geometry().contains(globalPos);
 }
@@ -1079,6 +1183,61 @@ static QByteArray withValidNormalGeometries(const QByteArray& layout)
     return changed ? QJsonDocument(root).toJson(QJsonDocument::Compact) : layout;
 }
 
+//! NOTE: KDDockWidgets keeps a single main window placeholder per dock: deserializing a dock's second one
+//! (e.g. one in the main window and one in the secondary window) removes the first, and its layout item along
+//! with it, while the layout is being restored - shifting the item indexes of every dock restored after it.
+//! These then got restored in the wrong places (e.g. the Video panel in a docking holder's slot), which could
+//! crash KDDockWidgets when opening them. Only the last one is kept, as KDDockWidgets does, but before restoring
+static QByteArray withSingleMainWindowPlaceholders(const QByteArray& layout)
+{
+    QJsonParseError error;
+    QJsonDocument document = QJsonDocument::fromJson(layout, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return layout;
+    }
+
+    QJsonObject root = document.object();
+    QJsonArray docks = root.value(QStringLiteral("allDockWidgets")).toArray();
+    bool changed = false;
+
+    for (qsizetype i = 0; i < docks.size(); ++i) {
+        QJsonObject dock = docks.at(i).toObject();
+        QJsonObject lastPosition = dock.value(QStringLiteral("lastPosition")).toObject();
+        const QJsonArray placeholders = lastPosition.value(QStringLiteral("placeholders")).toArray();
+
+        qsizetype lastMainWindowPlaceholder = -1;
+        for (qsizetype j = 0; j < placeholders.size(); ++j) {
+            if (!placeholders.at(j).toObject().value(QStringLiteral("isFloatingWindow")).toBool()) {
+                lastMainWindowPlaceholder = j;
+            }
+        }
+
+        QJsonArray keptPlaceholders;
+        for (qsizetype j = 0; j < placeholders.size(); ++j) {
+            const bool isMainWindowPlaceholder = !placeholders.at(j).toObject().value(QStringLiteral("isFloatingWindow")).toBool();
+            if (!isMainWindowPlaceholder || j == lastMainWindowPlaceholder) {
+                keptPlaceholders.append(placeholders.at(j));
+            }
+        }
+
+        if (keptPlaceholders.size() == placeholders.size()) {
+            continue;
+        }
+
+        lastPosition.insert(QStringLiteral("placeholders"), keptPlaceholders);
+        dock.insert(QStringLiteral("lastPosition"), lastPosition);
+        docks.replace(i, dock);
+        changed = true;
+    }
+
+    if (!changed) {
+        return layout;
+    }
+
+    root.insert(QStringLiteral("allDockWidgets"), docks);
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
 bool DockWindow::restoreLayout(const QByteArray& layout, bool restoreRelativeToMainWindow)
 {
     if (layout.isEmpty()) {
@@ -1091,7 +1250,7 @@ bool DockWindow::restoreLayout(const QByteArray& layout, bool restoreRelativeToM
                   : KDDockWidgets::RestoreOption_None;
 
     KDDockWidgets::LayoutSaver layoutSaver(iocContext()->id, option);
-    bool ok = layoutSaver.restoreLayout(withValidNormalGeometries(layout));
+    bool ok = layoutSaver.restoreLayout(withSingleMainWindowPlaceholders(withValidNormalGeometries(layout)));
 
     //! NOTE: KDDockWidgets' Layout::onResize() ignores every resize while a restore is in progress,
     //! but a restored floating window's layout view only reaches its real size (the restored window
