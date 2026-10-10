@@ -43,7 +43,7 @@ public:
     std::vector<std::string> availableAudioDrivers() const override;
 
     std::string currentAudioDriverName() const override;
-    void changeCurrentAudioDriver(const std::string& name) override;
+    bool changeCurrentAudioDriver(const std::string& name) override;
     async::Notification currentAudioDriverChanged() const override;
 
     // Current driver operation
@@ -76,6 +76,7 @@ public:
 private:
     IAudioDriverPtr createDriver(const std::string& name) const;
     void setNewDriver(IAudioDriverPtr newDriver);
+    bool openFirstWorkingDevice(IAudioDriver::Spec spec, const AudioDeviceID& preferredDeviceId);
 
     void handleOutputDeviceChange();
     bool switchToDefaultAudioDriver(IAudioDriver::Spec* activeSpec = nullptr);

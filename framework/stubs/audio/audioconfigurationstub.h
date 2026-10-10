@@ -38,6 +38,9 @@ public:
     void setAudioOutputDeviceId(const std::string& deviceId) override;
     async::Notification audioOutputDeviceIdChanged() const override;
 
+    std::string driverOutputDeviceId(const std::string& driverName) const override;
+    void setDriverOutputDeviceId(const std::string& driverName, const std::string& deviceId) override;
+
     audioch_t audioChannelsCount() const override;
 
     unsigned int driverBufferSize() const override; // samples

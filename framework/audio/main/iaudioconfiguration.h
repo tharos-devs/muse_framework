@@ -48,6 +48,10 @@ public:
     virtual void setAudioOutputDeviceId(const std::string& deviceId) = 0;
     virtual async::Notification audioOutputDeviceIdChanged() const = 0;
 
+    //! NOTE The device last opened with each driver, to open it again when going back to that driver
+    virtual std::string driverOutputDeviceId(const std::string& driverName) const = 0;
+    virtual void setDriverOutputDeviceId(const std::string& driverName, const std::string& deviceId) = 0;
+
     virtual audioch_t audioChannelsCount() const = 0;
 
     virtual unsigned int driverBufferSize() const = 0; // samples

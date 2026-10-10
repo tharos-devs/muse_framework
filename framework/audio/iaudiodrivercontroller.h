@@ -37,7 +37,8 @@ public:
     virtual std::vector<std::string> availableAudioDrivers() const = 0;
 
     virtual std::string currentAudioDriverName() const = 0;
-    virtual void changeCurrentAudioDriver(const std::string& name) = 0;
+    //! NOTE Returns whether one of the driver's devices could be opened
+    virtual bool changeCurrentAudioDriver(const std::string& name) = 0;
     virtual async::Notification currentAudioDriverChanged() const = 0;
 
     // Current driver operation
