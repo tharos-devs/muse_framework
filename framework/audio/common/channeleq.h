@@ -286,20 +286,36 @@ inline double magnitudeDb(const BandFilter& filter, double frequency, double sam
     return db;
 }
 
-//! NOTE The whole EQ's response at a frequency, in dB
-inline double responseDb(const EqParams& params, double frequency, double sampleRate)
+//! NOTE The filters of the bands changing the signal, to compute the EQ's response at many frequencies
+inline std::vector<BandFilter> activeFilters(const EqParams& params, double sampleRate)
 {
+    std::vector<BandFilter> filters;
     if (!params.enabled) {
-        return 0.0;
+        return filters;
     }
 
-    double db = 0.0;
     for (const EqBandParams& band : params.bands) {
         if (!isBandNeutral(band)) {
-            db += magnitudeDb(bandFilter(band, sampleRate), frequency, sampleRate);
+            filters.push_back(bandFilter(band, sampleRate));
         }
     }
 
+    return filters;
+}
+
+//! NOTE The whole EQ's response at a frequency, in dB
+inline double responseDb(const std::vector<BandFilter>& filters, double frequency, double sampleRate)
+{
+    double db = 0.0;
+    for (const BandFilter& filter : filters) {
+        db += magnitudeDb(filter, frequency, sampleRate);
+    }
+
     return db;
+}
+
+inline double responseDb(const EqParams& params, double frequency, double sampleRate)
+{
+    return responseDb(activeFilters(params, sampleRate), frequency, sampleRate);
 }
 }

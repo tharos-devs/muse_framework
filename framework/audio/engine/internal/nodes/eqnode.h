@@ -41,7 +41,7 @@ class EqNode : public AudioNode<EqTag>
 {
 public:
 
-    void setParams(const EqParams& params);
+    void setParams(const EqParams& unsafeParams);
     const EqParams& params() const;
 
 protected:

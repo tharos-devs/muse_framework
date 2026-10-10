@@ -33,8 +33,21 @@ static constexpr samples_t GLIDE_BLOCK_SAMPLES = 32;
 // time constant of the glide
 static constexpr double GLIDE_SECONDS = 0.02;
 
-void EqNode::setParams(const EqParams& params)
+//! NOTE Kept within the ranges the filters are made for, whatever the sender
+static EqParams sanitized(const EqParams& params)
 {
+    EqParams result = params;
+    for (EqBandParams& band : result.bands) {
+        band.frequency = std::isfinite(band.frequency) ? std::clamp(band.frequency, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX) : 1000.f;
+        band.gain = std::isfinite(band.gain) ? std::clamp(band.gain, EQ_GAIN_DB_MIN, EQ_GAIN_DB_MAX) : 0.f;
+        band.q = std::isfinite(band.q) ? std::clamp(band.q, EQ_Q_MIN, EQ_Q_MAX) : 1.f;
+    }
+    return result;
+}
+
+void EqNode::setParams(const EqParams& unsafeParams)
+{
+    const EqParams params = sanitized(unsafeParams);
     if (m_target == params) {
         return;
     }
