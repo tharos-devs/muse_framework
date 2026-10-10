@@ -55,19 +55,18 @@ public:
     void doProcessLongData(uint8_t* data, size_t size, tick_t tick);
 
 private:
-    Ret run();
-    void stop();
+    Ret openDevice(const MidiDeviceID& deviceID);
 
     struct Win;
     std::shared_ptr<Win> m_win;
     MidiDeviceID m_deviceID;
-    bool m_running = false;
     async::Notification m_deviceChanged;
 
     async::Notification m_availableDevicesChanged;
     MidiDevicesListener m_devicesListener;
 
     mutable std::mutex m_devicesMutex;
+    std::mutex m_processMutex;
 
     async::Channel<tick_t, Event > m_eventReceived;
 };

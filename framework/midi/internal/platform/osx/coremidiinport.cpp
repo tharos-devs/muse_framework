@@ -25,6 +25,7 @@
 #include <CoreServices/CoreServices.h>
 #include <CoreMIDI/CoreMIDI.h>
 
+#include "containers.h"
 #include "translation.h"
 #include "midierrors.h"
 #include "defer.h"
@@ -32,6 +33,8 @@
 
 using namespace muse;
 using namespace muse::midi;
+
+static_assert(std::is_same_v<MIDIEndpointRef, uint32_t>, "CoreMidiInPort::connectSource() takes a MIDIEndpointRef as uint32_t");
 
 //#define DEBUG_COREMIDIINPORT
 #ifdef DEBUG_COREMIDIINPORT
@@ -45,8 +48,7 @@ using namespace muse::midi;
 struct muse::midi::CoreMidiInPort::Core {
     MIDIClientRef client = 0;
     MIDIPortRef inputPort = 0;
-    MIDIEndpointRef sourceId = 0;
-    int deviceID = -1;
+    std::vector<MIDIEndpointRef> sources; // the connected ones: one, or every source with ALL_DEVICES_ID
 };
 
 CoreMidiInPort::CoreMidiInPort()
@@ -83,6 +85,7 @@ MidiDeviceList CoreMidiInPort::availableDevices() const
     MidiDeviceList ret;
 
     ret.push_back({ NONE_DEVICE_ID, muse::trc("midi", "No device") });
+    ret.push_back({ ALL_DEVICES_ID, muse::trc("midi", "All devices") });
 
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, false);
     ItemCount sources = MIDIGetNumberOfSources();
@@ -145,11 +148,22 @@ void CoreMidiInPort::initCore()
                 break;
             }
 
-            if (notification->messageID == kMIDIMsgObjectRemoved) {
-                MIDIObjectRef removedObject = addRemoveNotification->child;
+            const MIDIEndpointRef source = (MIDIEndpointRef)addRemoveNotification->child;
+            const bool listensToAll = self->m_deviceID == ALL_DEVICES_ID;
 
-                if (self->isConnected() && removedObject == self->m_core->sourceId) {
-                    self->disconnect();
+            if (notification->messageID == kMIDIMsgObjectAdded) {
+                if (listensToAll) {
+                    self->connectSource(source);
+                }
+            } else {
+                std::vector<MIDIEndpointRef>& sources = self->m_core->sources;
+                if (muse::contains(sources, source)) {
+                    if (listensToAll) {
+                        // CoreMIDI has already dropped its connection
+                        muse::remove(sources, source);
+                    } else {
+                        self->disconnect();
+                    }
                 }
             }
 
@@ -280,19 +294,29 @@ Ret CoreMidiInPort::connect(const MidiDeviceID& deviceID)
             return make_ret(Err::MidiFailedConnect, "failed create port");
         }
 
-        MIDIObjectRef obj;
-        MIDIObjectType type;
+        if (deviceID == ALL_DEVICES_ID) {
+            m_deviceID = deviceID;
 
-        OSStatus err = MIDIObjectFindByUniqueID(std::stoi(deviceID), &obj, &type);
-        if (err != noErr) {
-            return make_ret(Err::MidiFailedConnect, "failed get source");
+            const ItemCount count = MIDIGetNumberOfSources();
+            for (ItemCount i = 0; i < count; ++i) {
+                if (MIDIEndpointRef source = MIDIGetSource(i)) {
+                    connectSource(source);
+                }
+            }
+        } else {
+            MIDIObjectRef obj;
+            MIDIObjectType type;
+
+            OSStatus err = MIDIObjectFindByUniqueID(std::stoi(deviceID), &obj, &type);
+            if (err != noErr) {
+                return make_ret(Err::MidiFailedConnect, "failed get source");
+            }
+
+            ret = connectSource((MIDIEndpointRef)obj);
+            if (ret) {
+                m_deviceID = deviceID;
+            }
         }
-
-        m_core->deviceID = std::stoi(deviceID);
-        m_core->sourceId = (MIDIEndpointRef)obj;
-
-        m_deviceID = deviceID;
-        ret = run();
     } else {
         m_deviceID = deviceID;
     }
@@ -310,17 +334,23 @@ void CoreMidiInPort::disconnect()
         return;
     }
 
-    stop();
+    for (MIDIEndpointRef source : m_core->sources) {
+        OSStatus result = MIDIPortDisconnectSource(m_core->inputPort, source);
+        if (result != noErr && result != kMIDINoConnection) {
+            LOGE() << "can't disconnect midi port " << result;
+        }
+    }
+    m_core->sources.clear();
 
     LOGD() << "Disconnected from " << m_deviceID;
 
-    m_core->sourceId = 0;
     m_deviceID.clear();
 }
 
+//! NOTE: listening to all devices stays connected without any device plugged in, so that the next one is listened to
 bool CoreMidiInPort::isConnected() const
 {
-    return m_core->sourceId && !m_deviceID.empty();
+    return !m_deviceID.empty() && (m_deviceID == ALL_DEVICES_ID || !m_core->sources.empty());
 }
 
 MidiDeviceID CoreMidiInPort::deviceID() const
@@ -338,36 +368,18 @@ async::Channel<tick_t, Event> CoreMidiInPort::eventReceived() const
     return m_eventReceived;
 }
 
-Ret CoreMidiInPort::run()
+Ret CoreMidiInPort::connectSource(uint32_t source)
 {
-    if (!isConnected()) {
-        return make_ret(Err::MidiNotConnected);
+    if (muse::contains(m_core->sources, source)) {
+        return muse::make_ok();
     }
 
-    OSStatus result = MIDIPortConnectSource(m_core->inputPort, m_core->sourceId, nullptr /*connRefCon*/);
-    if (result == noErr) {
-        m_running = true;
-        return Ret(true);
-    }
-    m_running = false;
-    return make_ret(Err::MidiFailedConnect);
-}
-
-void CoreMidiInPort::stop()
-{
-    if (!isConnected()) {
-        LOGE() << "midi port is not connected";
-        return;
+    OSStatus result = MIDIPortConnectSource(m_core->inputPort, source, nullptr /*connRefCon*/);
+    if (result != noErr) {
+        LOGW() << "failed connect source, err: " << result;
+        return make_ret(Err::MidiFailedConnect);
     }
 
-    OSStatus result = MIDIPortDisconnectSource(m_core->inputPort, m_core->sourceId);
-    switch (result) {
-    case kMIDINoConnection:
-        LOGI() << "wasn't started";
-        break;
-    case noErr: break;
-    default:
-        LOGE() << "can't disconnect midi port " << result;
-    }
-    m_running = false;
+    m_core->sources.push_back(source);
+    return muse::make_ok();
 }

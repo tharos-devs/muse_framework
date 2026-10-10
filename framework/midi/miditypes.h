@@ -124,6 +124,8 @@ struct MidiData {
 };
 
 static constexpr char NONE_DEVICE_ID[] = "-1";
+//! NOTE: an input port connected to this listens to every input device, including the ones plugged in later
+static constexpr char ALL_DEVICES_ID[] = "all";
 
 using MidiDeviceID = std::string;
 struct MidiDevice {

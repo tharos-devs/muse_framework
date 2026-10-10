@@ -48,18 +48,14 @@ public:
     async::Channel<tick_t, Event> eventReceived() const override;
 
 private:
-    Ret run();
-    void stop();
-
     void initCore();
+    Ret connectSource(uint32_t source); // a MIDIEndpointRef
 
     struct Core;
     std::unique_ptr<Core> m_core;
     MidiDeviceID m_deviceID;
     async::Notification m_deviceChanged;
     async::Notification m_availableDevicesChanged;
-
-    bool m_running = false;
 
     async::Channel<tick_t, Event > m_eventReceived;
 };
