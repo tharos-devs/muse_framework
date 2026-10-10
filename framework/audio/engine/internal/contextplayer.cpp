@@ -126,9 +126,10 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
     const TimePosition newTime = m_currentPosition.forwarded(delta);
     if (m_timeLoopStart < m_timeLoopEnd && newTime.time() >= m_timeLoopEnd) {
         //! TODO Seek may be necessary to call this directly within the PROC thread.
-        m_timeEvent.send(TimeEvent { TimeEventType::LoopEnded, newTime }); // forwarding an event to the engine thread
         const secs_t overshoot = newTime.time() - m_timeLoopEnd;
-        return TimePosition::fromTime(m_timeLoopStart + overshoot, delta.sampleRate());
+        const TimePosition loopPosition = TimePosition::fromTime(m_timeLoopStart + overshoot, delta.sampleRate());
+        m_timeEvent.send(TimeEvent { TimeEventType::LoopEnded, loopPosition }); // forwarding an event to the engine thread
+        return loopPosition;
     }
 
     // Check: Duration
@@ -168,8 +169,10 @@ void ContextPlayer::onTimeEvent(const TimeEvent event)
         });
         break;
     case TimeEventType::LoopEnded:
-        exec(OperationType::QuickOperation, [this, event]() {
-            seekAllTracks(event.position);
+        //! NOTE The sources follow the position back to the loop's start: where it is when the processing is paused
+        //! for the seek (it may have gone on since the wrap), not before the wrap (they went on past the loop's end)
+        exec(OperationType::QuickOperation, [this]() {
+            seekAllTracks(m_currentPosition);
         });
         break;
     case TimeEventType::PlaybackEnded:
