@@ -114,9 +114,25 @@ void PopupView::setParentItem(QQuickItem* parent)
     }
 }
 
+//! NOTE: e.g. the secondary window kept on top (see DockWindow): a popup would otherwise open behind it
+static bool hasVisibleStaysOnTopWindow(const QWindow* except)
+{
+    for (const QWindow* window : QGuiApplication::topLevelWindows()) {
+        if (window != except && window->isVisible() && window->flags().testFlag(Qt::WindowStaysOnTopHint)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void PopupView::beforeOpen()
 {
     WindowView::beforeOpen();
+
+    if (m_view) {
+        m_view->setFlag(Qt::WindowStaysOnTopHint, hasVisibleStaysOnTopWindow(m_view));
+    }
 
     if (!m_closeController) {
         initCloseController();

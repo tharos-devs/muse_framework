@@ -852,6 +852,61 @@ void DockBase::applySizeConstraints()
     }
 
     syncLayoutItemSizeConstraints();
+
+    //! NOTE: later, not while KDDockWidgets may be laying out (e.g. inserting this dock)
+    QTimer::singleShot(0, this, [this]() {
+        shrinkToMaximumSizeInLayout();
+    });
+}
+
+//! NOTE: KDDockWidgets applies a lowered maximum size to later resizes only: a dock already larger keeps its size.
+//! E.g. the Video panel dropped below the side panels was laid out with its wide minimum (sidebar beside the
+//! picture), widening their fixed width column, then given their width once there - the column stayed wide, and
+//! couldn't be narrowed anymore (each dock in it at its minimum)
+void DockBase::shrinkToMaximumSizeInLayout()
+{
+    //! NOTE: panels only: some toolbars are laid out a little larger than their maximum on purpose (e.g. to the
+    //! main toolbar's height in their row), and shrinking them would fight their own relayout
+    if (!m_dockWidget || m_floating || type() != DockType::Panel) {
+        return;
+    }
+
+    KDDockWidgets::Core::Group* group = groupForDockWidget(m_dockWidget);
+    if (!group || !group->isInMainWindow()) {
+        return;
+    }
+
+    const QQuickItem* view = KDDockWidgets::QtQuick::asQQuickItem(group);
+    if (!view || !view->isVisible() || !view->window()) {
+        return;
+    }
+
+    const QSize maximumSize = group->view()->maxSizeHint();
+    const int extraWidth = static_cast<int>(view->width()) - maximumSize.width();
+    const int extraHeight = static_cast<int>(view->height()) - maximumSize.height();
+    if (extraWidth <= 0 && extraHeight <= 0) {
+        return;
+    }
+
+    //! NOTE: shrunk from its edge facing the middle of the window (e.g. the right one for a left side panel)
+    const QPointF center = view->mapToScene(QPointF(view->width() / 2, view->height() / 2));
+    const bool isInLeftHalf = center.x() < view->window()->width() / 2.0;
+    const bool isInTopHalf = center.y() < view->window()->height() / 2.0;
+
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+
+    if (extraWidth > 0) {
+        (isInLeftHalf ? right : left) = -extraWidth;
+    }
+
+    if (extraHeight > 0) {
+        (isInTopHalf ? bottom : top) = -extraHeight;
+    }
+
+    m_dockWidget->resizeInLayout(left, top, right, bottom);
 }
 
 void DockBase::syncLayoutItemSizeConstraints()

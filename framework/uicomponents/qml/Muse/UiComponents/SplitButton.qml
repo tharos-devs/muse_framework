@@ -66,7 +66,9 @@ FocusScope {
         // Gives the caller a chance to refresh root.menuItems synchronously (e.g. its checked
         // state) right before the menu is actually shown, in case it only updates reactively and
         // could otherwise be stale between opens.
-        root.aboutToOpenMenu()
+        if (!menuLoader.isMenuOpened) {
+            root.aboutToOpenMenu()
+        }
         menuLoader.parent = root
         menuLoader.toggleOpened(root.menuItems)
     }
