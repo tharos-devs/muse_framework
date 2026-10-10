@@ -35,10 +35,14 @@
 #include "log.h"
 
 struct muse::midi::WinMidiInPort::Win {
-    HMIDIIN midiIn;
-    int deviceID = -1;
-    MIDIHDR header;
-    std::vector<uint8_t> buffer;
+    struct Input {
+        HMIDIIN midiIn = nullptr;
+        MIDIHDR header {};
+        std::vector<uint8_t> buffer;
+    };
+
+    // the opened devices: one, or every device with ALL_DEVICES_ID (MIDIHDR must not move once prepared)
+    std::vector<std::unique_ptr<Input> > inputs;
 };
 
 using namespace muse;
@@ -69,6 +73,14 @@ void WinMidiInPort::init()
     });
 
     m_devicesListener.devicesChanged().onNotify(this, [this]() {
+        //! NOTE: a device id holds the device's index, which changes when another device is unplugged:
+        //! every device is opened again
+        if (m_deviceID == ALL_DEVICES_ID) {
+            connect(ALL_DEVICES_ID);
+            m_availableDevicesChanged.notify();
+            return;
+        }
+
         bool connectedDeviceRemoved = true;
         for (const MidiDevice& device: availableDevices()) {
             if (m_deviceID == device.id) {
@@ -97,6 +109,7 @@ MidiDeviceList WinMidiInPort::availableDevices() const
     MidiDeviceList ret;
 
     ret.push_back({ NONE_DEVICE_ID, muse::trc("midi", "No device") });
+    ret.push_back({ ALL_DEVICES_ID, muse::trc("midi", "All devices") });
 
     unsigned int numDevs = midiInGetNumDevs();
     if (numDevs == 0) {
@@ -141,7 +154,10 @@ static void CALLBACK process(HMIDIIN hMidiIn, UINT wMsg, DWORD_PTR dwInstance, D
         if (hdr->dwBytesRecorded > 0) {
             uint8_t* data = reinterpret_cast<uint8_t*>(hdr->lpData);
             self->doProcessLongData(data, hdr->dwBytesRecorded, static_cast<tick_t>(dwParam2));
-            midiInAddBuffer(hMidiIn, hdr, sizeof(MIDIHDR));
+            // while closing, midiInReset() returns the buffer: added again, it couldn't be unprepared
+            if (!self->isClosing()) {
+                midiInAddBuffer(hMidiIn, hdr, sizeof(MIDIHDR));
+            }
         }
     } break;
     default:
@@ -149,10 +165,12 @@ static void CALLBACK process(HMIDIIN hMidiIn, UINT wMsg, DWORD_PTR dwInstance, D
     }
 }
 
+//! NOTE: every opened device calls back from its own thread
 void WinMidiInPort::doProcess(uint32_t message, tick_t tick)
 {
     auto e = Event::fromMidi10Package(message).toMIDI20();
     if (e) {
+        std::lock_guard lock(m_processMutex);
         m_eventReceived.send(tick, e);
     }
 }
@@ -160,6 +178,7 @@ void WinMidiInPort::doProcess(uint32_t message, tick_t tick)
 void WinMidiInPort::doProcessLongData(uint8_t* data, size_t size, tick_t tick)
 {
     std::vector<Event> events = Event::fromMidi10SysExBytes(data, size);
+    std::lock_guard lock(m_processMutex);
     for (const Event& e : events) {
         m_eventReceived.send(tick, e);
     }
@@ -175,35 +194,67 @@ Ret WinMidiInPort::connect(const MidiDeviceID& deviceID)
         disconnect();
     }
 
-    Ret ret = muse::make_ok();
-
-    if (!deviceID.empty() && deviceID != NONE_DEVICE_ID) {
-        std::vector<int> deviceParams = splitDeviceId(deviceID);
-        IF_ASSERT_FAILED(deviceParams.size() == 3) {
-            return make_ret(Err::MidiInvalidDeviceID, "invalid device id: " + deviceID);
-        }
-
-        m_win->deviceID = deviceParams.at(0);
-        MMRESULT openRes = midiInOpen(&m_win->midiIn, m_win->deviceID,
-                                      reinterpret_cast<DWORD_PTR>(&process),
-                                      reinterpret_cast<DWORD_PTR>(this),
-                                      CALLBACK_FUNCTION | MIDI_IO_STATUS);
-
-        if (openRes != MMSYSERR_NOERROR) {
-            return make_ret(Err::MidiFailedConnect, "failed open port, error: " + wmidi_prv::errorString(ret));
-        }
-
+    if (deviceID.empty() || deviceID == NONE_DEVICE_ID) {
         m_deviceID = deviceID;
-        ret = run();
-    } else {
-        m_deviceID = deviceID;
+        return muse::make_ok();
     }
 
+    if (deviceID == ALL_DEVICES_ID) {
+        m_deviceID = deviceID;
+
+        for (const MidiDevice& device : availableDevices()) {
+            if (device.id == NONE_DEVICE_ID || device.id == ALL_DEVICES_ID) {
+                continue;
+            }
+
+            // e.g. a device used by another application can't be opened: the others are still listened to
+            Ret ret = openDevice(device.id);
+            if (!ret) {
+                LOGW() << ret.text();
+            }
+        }
+
+        LOGI() << "Connected to " << m_deviceID << ", opened devices: " << m_win->inputs.size();
+        return muse::make_ok();
+    }
+
+    Ret ret = openDevice(deviceID);
     if (ret) {
+        m_deviceID = deviceID;
         LOGI() << "Connected to " << m_deviceID;
     }
 
     return ret;
+}
+
+Ret WinMidiInPort::openDevice(const MidiDeviceID& deviceID)
+{
+    std::vector<int> deviceParams = splitDeviceId(deviceID);
+    IF_ASSERT_FAILED(deviceParams.size() == 3) {
+        return make_ret(Err::MidiInvalidDeviceID, "invalid device id: " + deviceID);
+    }
+
+    auto input = std::make_unique<Win::Input>();
+    MMRESULT openRes = midiInOpen(&input->midiIn, deviceParams.at(0),
+                                  reinterpret_cast<DWORD_PTR>(&process),
+                                  reinterpret_cast<DWORD_PTR>(this),
+                                  CALLBACK_FUNCTION | MIDI_IO_STATUS);
+
+    if (openRes != MMSYSERR_NOERROR) {
+        return make_ret(Err::MidiFailedConnect, "failed open port " + deviceID + ", error: " + wmidi_prv::errorString(openRes));
+    }
+
+    input->buffer.resize(1024, 0);
+    input->header.lpData = reinterpret_cast<LPSTR>(input->buffer.data());
+    input->header.dwBufferLength = static_cast<DWORD>(input->buffer.size());
+
+    midiInPrepareHeader(input->midiIn, &input->header, sizeof(MIDIHDR));
+    midiInAddBuffer(input->midiIn, &input->header, sizeof(MIDIHDR));
+    midiInStart(input->midiIn);
+
+    m_win->inputs.push_back(std::move(input));
+
+    return muse::make_ok();
 }
 
 void WinMidiInPort::disconnect()
@@ -212,17 +263,17 @@ void WinMidiInPort::disconnect()
         return;
     }
 
-    stop();
-
-    midiInReset(m_win->midiIn);
-    midiInUnprepareHeader(m_win->midiIn, &m_win->header, sizeof(MIDIHDR));
-
-    midiInClose(m_win->midiIn);
+    m_closing = true;
+    for (const std::unique_ptr<Win::Input>& input : m_win->inputs) {
+        midiInStop(input->midiIn);
+        midiInReset(input->midiIn);
+        midiInUnprepareHeader(input->midiIn, &input->header, sizeof(MIDIHDR));
+        midiInClose(input->midiIn);
+    }
+    m_win->inputs.clear();
+    m_closing = false;
 
     LOGI() << "Disconnected from " << m_deviceID;
-
-    m_win->midiIn = nullptr;
-    m_win->deviceID = -1;
 
     m_deviceID.clear();
 }
@@ -245,44 +296,4 @@ async::Notification WinMidiInPort::deviceChanged() const
 async::Channel<tick_t, Event> WinMidiInPort::eventReceived() const
 {
     return m_eventReceived;
-}
-
-Ret WinMidiInPort::run()
-{
-    if (!isConnected()) {
-        return make_ret(Err::MidiNotConnected);
-    }
-
-    if (m_running) {
-        LOGW() << "Already started: " << m_deviceID;
-        return true;
-    }
-
-    m_win->buffer.clear();
-    m_win->buffer.resize(1024, 0);
-    m_win->header.lpData = reinterpret_cast<LPSTR>(m_win->buffer.data());
-    m_win->header.dwBufferLength = static_cast<DWORD>(m_win->buffer.size());
-
-    midiInPrepareHeader(m_win->midiIn, &m_win->header, sizeof(MIDIHDR));
-    midiInAddBuffer(m_win->midiIn, &m_win->header, sizeof(MIDIHDR));
-    midiInStart(m_win->midiIn);
-
-    m_running = true;
-
-    return Ret(true);
-}
-
-void WinMidiInPort::stop()
-{
-    if (!isConnected()) {
-        return;
-    }
-
-    if (!m_running) {
-        LOGW() << "Already stopped: " << m_deviceID;
-        return;
-    }
-
-    midiInStop(m_win->midiIn);
-    m_running = false;
 }

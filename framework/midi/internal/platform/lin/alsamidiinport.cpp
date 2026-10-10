@@ -32,8 +32,7 @@
 
 struct muse::midi::AlsaMidiInPort::Alsa {
     snd_seq_t* midiIn = nullptr;
-    int client = -1;
-    int port = -1;
+    std::vector<std::pair<int, int> > sources; // the connected client/port pairs: one, or every device with ALL_DEVICES_ID
 };
 
 using namespace muse;
@@ -48,6 +47,12 @@ void AlsaMidiInPort::init()
     });
 
     m_devicesListener.devicesChanged().onNotify(this, [this]() {
+        if (m_deviceID == ALL_DEVICES_ID) {
+            connect(ALL_DEVICES_ID);
+            m_availableDevicesChanged.notify();
+            return;
+        }
+
         bool connectedDeviceRemoved = true;
         for (const MidiDevice& device: availableDevices()) {
             if (m_deviceID == device.id) {
@@ -82,6 +87,7 @@ MidiDeviceList AlsaMidiInPort::availableDevices() const
     MidiDeviceList ret;
 
     ret.push_back({ NONE_DEVICE_ID, muse::trc("midi", "No device") });
+    ret.push_back({ ALL_DEVICES_ID, muse::trc("midi", "All devices") });
 
     snd_seq_client_info_t* cinfo;
     snd_seq_port_info_t* pinfo;
@@ -155,9 +161,15 @@ Ret AlsaMidiInPort::connect(const MidiDeviceID& deviceID)
     Ret ret = muse::make_ok();
 
     if (!deviceID.empty() && deviceID != NONE_DEVICE_ID) {
-        std::vector<int> deviceParams = splitDeviceId(deviceID);
-        IF_ASSERT_FAILED(deviceParams.size() == 3) {
-            return make_ret(Err::MidiInvalidDeviceID, "invalid device id: " + deviceID);
+        MidiDeviceList devices;
+        if (deviceID == ALL_DEVICES_ID) {
+            for (const MidiDevice& device : availableDevices()) {
+                if (device.id != NONE_DEVICE_ID && device.id != ALL_DEVICES_ID) {
+                    devices.push_back(device);
+                }
+            }
+        } else {
+            devices.push_back({ deviceID, std::string() });
         }
 
         int err = snd_seq_open(&m_alsa->midiIn, "default", SND_SEQ_OPEN_INPUT, SND_SEQ_NONBLOCK);
@@ -172,11 +184,26 @@ Ret AlsaMidiInPort::connect(const MidiDeviceID& deviceID)
             return make_ret(Err::MidiFailedConnect, "failed create port");
         }
 
-        m_alsa->client = deviceParams.at(1);
-        m_alsa->port = deviceParams.at(2);
-        err = snd_seq_connect_from(m_alsa->midiIn, 0, m_alsa->client, m_alsa->port);
-        if (err < 0) {
-            return make_ret(Err::MidiFailedConnect,  "failed connect, err: " + std::string(snd_strerror(err)));
+        for (const MidiDevice& device : devices) {
+            std::vector<int> deviceParams = splitDeviceId(device.id);
+            IF_ASSERT_FAILED(deviceParams.size() == 3) {
+                return make_ret(Err::MidiInvalidDeviceID, "invalid device id: " + device.id);
+            }
+
+            const int srcClient = deviceParams.at(1);
+            const int srcPort = deviceParams.at(2);
+            err = snd_seq_connect_from(m_alsa->midiIn, 0, srcClient, srcPort);
+            if (err < 0) {
+                // one device failing doesn't prevent listening to the others
+                if (deviceID != ALL_DEVICES_ID) {
+                    return make_ret(Err::MidiFailedConnect, "failed connect, err: " + std::string(snd_strerror(err)));
+                }
+
+                LOGW() << "failed connect to " << device.id << ", err: " << snd_strerror(err);
+                continue;
+            }
+
+            m_alsa->sources.emplace_back(srcClient, srcPort);
         }
 
         m_deviceID = deviceID;
@@ -198,15 +225,17 @@ void AlsaMidiInPort::disconnect()
         return;
     }
 
-    snd_seq_disconnect_to(m_alsa->midiIn, 0, m_alsa->client, m_alsa->port);
-    snd_seq_close(m_alsa->midiIn);
-
+    // the reading thread uses the sequencer until it stops
     stop();
+
+    for (const auto& [client, port] : m_alsa->sources) {
+        snd_seq_disconnect_from(m_alsa->midiIn, 0, client, port);
+    }
+    snd_seq_close(m_alsa->midiIn);
 
     LOGD() << "Disconnected from " << m_deviceID;
 
-    m_alsa->client = -1;
-    m_alsa->port = -1;
+    m_alsa->sources.clear();
     m_alsa->midiIn = nullptr;
     m_deviceID.clear();
 }
