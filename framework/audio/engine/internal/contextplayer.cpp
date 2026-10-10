@@ -125,10 +125,13 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
     // Check: Loop
     const TimePosition newTime = m_currentPosition.forwarded(delta);
     if (m_timeLoopStart < m_timeLoopEnd && newTime.time() >= m_timeLoopEnd) {
-        //! TODO Seek may be necessary to call this directly within the PROC thread.
-        m_timeEvent.send(TimeEvent { TimeEventType::LoopEnded, newTime }); // forwarding an event to the engine thread
-        const secs_t overshoot = newTime.time() - m_timeLoopEnd;
-        return TimePosition::fromTime(m_timeLoopStart + overshoot, delta.sampleRate());
+        //! NOTE The sources go back to the loop's start right here, before the next block: done later by the engine
+        //! thread, they started past it (by the overshoot and the blocks gone meanwhile), skipping the loop's first
+        //! notes. Everything processing this block is done at this point (the playhead is forwarded after the whole
+        //! chain). The overshoot (less than a block) isn't kept, so that nothing at the loop's start is skipped
+        const TimePosition loopStart = TimePosition::fromTime(m_timeLoopStart, delta.sampleRate());
+        proc_seekAllTracks(loopStart);
+        return loopStart;
     }
 
     // Check: Duration
@@ -165,11 +168,6 @@ void ContextPlayer::onTimeEvent(const TimeEvent event)
         exec(OperationType::QuickOperation, [this]() {
             m_isActive.set(m_status.val == PlaybackStatus::Running);
             m_waitingForActivation = false;
-        });
-        break;
-    case TimeEventType::LoopEnded:
-        exec(OperationType::QuickOperation, [this, event]() {
-            seekAllTracks(event.position);
         });
         break;
     case TimeEventType::PlaybackEnded:
@@ -357,6 +355,19 @@ void ContextPlayer::seekAllTracks(const TimePosition& position)
     ONLY_ON_OPERATION_EXEC;
 
     IF_ASSERT_FAILED(m_trackSource) {
+        return;
+    }
+
+    for (const auto& source : m_trackSource->allTracksSources()) {
+        source->seek(position, m_flushSoundOnSeek);
+    }
+}
+
+void ContextPlayer::proc_seekAllTracks(const TimePosition& position)
+{
+    ONLY_AUDIO_PROC_THREAD;
+
+    if (!m_trackSource) {
         return;
     }
 
