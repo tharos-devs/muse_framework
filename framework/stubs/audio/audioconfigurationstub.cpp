@@ -62,6 +62,15 @@ async::Notification AudioConfigurationStub::audioOutputDeviceIdChanged() const
     return async::Notification();
 }
 
+std::string AudioConfigurationStub::driverOutputDeviceId(const std::string&) const
+{
+    return "";
+}
+
+void AudioConfigurationStub::setDriverOutputDeviceId(const std::string&, const std::string&)
+{
+}
+
 audioch_t AudioConfigurationStub::audioChannelsCount() const
 {
     return 2;

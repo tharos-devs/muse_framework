@@ -35,8 +35,9 @@ std::string AudioDriverControllerStub::currentAudioDriverName() const
     return {};
 }
 
-void AudioDriverControllerStub::changeCurrentAudioDriver(const std::string&)
+bool AudioDriverControllerStub::changeCurrentAudioDriver(const std::string&)
 {
+    return false;
 }
 
 async::Notification AudioDriverControllerStub::currentAudioDriverChanged() const

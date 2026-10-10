@@ -152,6 +152,21 @@ async::Notification AudioConfiguration::audioOutputDeviceIdChanged() const
     return m_audioOutputDeviceIdChanged;
 }
 
+static Settings::Key driverOutputDeviceKey(const std::string& driverName)
+{
+    return Settings::Key("audio", "io/outputDevice/" + driverName);
+}
+
+std::string AudioConfiguration::driverOutputDeviceId(const std::string& driverName) const
+{
+    return settings()->value(driverOutputDeviceKey(driverName)).toString();
+}
+
+void AudioConfiguration::setDriverOutputDeviceId(const std::string& driverName, const std::string& deviceId)
+{
+    settings()->setSharedValue(driverOutputDeviceKey(driverName), Val(deviceId));
+}
+
 audioch_t AudioConfiguration::audioChannelsCount() const
 {
     return AUDIO_CHANNELS;

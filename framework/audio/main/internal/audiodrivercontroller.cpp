@@ -22,9 +22,12 @@
 
 #include "audiodrivercontroller.h"
 
+#include <algorithm>
+
 #include "common/audiotaskscheduler.h"
 #include "common/iaudiotaskscheduler.h"
 #include "global/async/async.h"
+#include "global/containers.h"
 
 #include "muse_framework_config.h"
 
@@ -196,6 +199,7 @@ void AudioDriverController::setNewDriver(IAudioDriverPtr newDriver)
 
             async::Async::call(this, [this, spec]() {
                 configuration()->setAudioOutputDeviceId(spec.deviceId);
+                configuration()->setDriverOutputDeviceId(currentAudioDriverName(), spec.deviceId);
 
                 m_outputDeviceChanged.notify();
                 m_outputDeviceBufferSizeChanged.notify();
@@ -217,10 +221,10 @@ std::string AudioDriverController::currentAudioDriverName() const
     return configuration()->currentAudioDriverName();
 }
 
-void AudioDriverController::changeCurrentAudioDriver(const std::string& name)
+bool AudioDriverController::changeCurrentAudioDriver(const std::string& name)
 {
     IF_ASSERT_FAILED(m_audioDriver) {
-        return;
+        return false;
     }
 
     if (m_audioDriver->isOpened()) {
@@ -232,24 +236,61 @@ void AudioDriverController::changeCurrentAudioDriver(const std::string& name)
     m_audioDriver->init();
     LOGI() << "Used audio driver: " << m_audioDriver->name();
 
-    // reset to default
+    // set before opening: the opened device is remembered for this driver
+    configuration()->setCurrentAudioDriverName(name);
+
     IAudioDriver::Spec spec;
     spec.output = configuration()->defaultOutputSpec();
     spec.callback = m_callback;
 
-    if (m_audioDriver && !m_audioDriver->defaultDevice().empty()) {
-        spec.deviceId = DEFAULT_DEVICE_ID;
-        bool ok = m_audioDriver->open(spec, nullptr);
-        if (!ok) {
-            LOGE() << "Failed to open audio driver: " << name;
-        }
-    } else {
-        LOGW() << "No devices for " << name;
+    const bool ok = openFirstWorkingDevice(spec, configuration()->driverOutputDeviceId(name));
+    if (!ok) {
+        LOGE() << "Failed to open audio driver: " << name;
     }
 
-    configuration()->setCurrentAudioDriverName(name);
     m_currentAudioDriverChanged.notify();
     m_availableOutputDevicesChanged.notify();
+
+    return ok;
+}
+
+//! NOTE The device last opened with this driver, else the driver's default one, else the first other one that opens:
+//! e.g. a driver listed first that has no output must not leave the application silent
+bool AudioDriverController::openFirstWorkingDevice(IAudioDriver::Spec spec, const AudioDeviceID& preferredDeviceId)
+{
+    const AudioDeviceList devices = m_audioDriver->availableOutputDevices();
+    if (devices.empty()) {
+        LOGW() << "No devices for " << m_audioDriver->name();
+        return false;
+    }
+
+    std::vector<AudioDeviceID> candidates;
+    auto addCandidate = [&candidates, &devices](const AudioDeviceID& deviceId) {
+        const bool available = std::any_of(devices.cbegin(), devices.cend(), [&deviceId](const AudioDevice& device) {
+            return device.id == deviceId;
+        });
+        if (available && !muse::contains(candidates, deviceId)) {
+            candidates.push_back(deviceId);
+        }
+    };
+
+    addCandidate(preferredDeviceId);
+    addCandidate(DEFAULT_DEVICE_ID); // e.g. WASAPI's "System default", following the system's choice
+    addCandidate(m_audioDriver->defaultDevice());
+    for (const AudioDevice& device : devices) {
+        addCandidate(device.id);
+    }
+
+    for (const AudioDeviceID& deviceId : candidates) {
+        spec.deviceId = deviceId;
+        if (m_audioDriver->open(spec, nullptr)) {
+            return true;
+        }
+
+        LOGW() << "Failed to open device: " << deviceId << ", driver: " << m_audioDriver->name();
+    }
+
+    return false;
 }
 
 async::Notification AudioDriverController::currentAudioDriverChanged() const
@@ -346,8 +387,20 @@ bool AudioDriverController::selectOutputDevice(const AudioDeviceID& deviceId)
     }
 
     if (!m_audioDriver->isOpened()) {
-        configuration()->setAudioOutputDeviceId(deviceId);
-        return true;
+        // not started yet: opened with this device when it starts
+        if (!m_callback) {
+            configuration()->setAudioOutputDeviceId(deviceId);
+            return true;
+        }
+
+        // e.g. none of the driver's devices could be opened: the chosen one is opened right away
+        IAudioDriver::Spec spec;
+        spec.deviceId = deviceId;
+        spec.callback = m_callback;
+        spec.output = configuration()->desiredOutputSpec();
+
+        LOGI() << "Trying to open output device: " << spec;
+        return m_audioDriver->open(spec, nullptr);
     }
 
     const IAudioDriver::Spec oldSpec = m_audioDriver->activeSpec();

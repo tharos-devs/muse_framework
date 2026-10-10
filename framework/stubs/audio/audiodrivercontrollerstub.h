@@ -32,7 +32,7 @@ public:
     std::vector<std::string> availableAudioDrivers() const override;
 
     std::string currentAudioDriverName() const override;
-    void changeCurrentAudioDriver(const std::string& name)  override;
+    bool changeCurrentAudioDriver(const std::string& name)  override;
     async::Notification currentAudioDriverChanged() const override;
 
     // Current driver operation
