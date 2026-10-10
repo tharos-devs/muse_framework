@@ -75,6 +75,7 @@ Ret AudioContext::init()
     m_masterTrack.chain->setSource(m_mixer);
     m_masterTrack.chain->setFxChain(nullptr); //!< NOTE Master fx chain is not exists yet
     m_masterTrack.chain->setGain(std::make_shared<GainNode>());
+    m_masterTrack.chain->setEq(std::make_shared<EqNode>());
     m_masterTrack.chain->setControl(masterControlNode);
     m_masterTrack.chain->setSignal(std::make_shared<SignalNode>());
     m_masterTrack.chain->rebuild();
@@ -217,6 +218,7 @@ RetVal2<TrackId, TrackParams> AudioContext::addTrack(const std::string& trackNam
     trackChain->setSource(source.val);
     trackChain->setFxChain(nullptr); // will be added later
     trackChain->setGain(std::make_shared<GainNode>());
+    trackChain->setEq(std::make_shared<EqNode>());
     trackChain->setControl(controlNode);
     trackChain->setSignal(std::make_shared<SignalNode>());
     trackChain->rebuild();
@@ -261,6 +263,7 @@ RetVal2<TrackId, TrackParams> AudioContext::addAuxTrack(const std::string& track
     trackChain->setMode(mode());
     trackChain->setFxChain(nullptr); // will be added later
     trackChain->setGain(std::make_shared<GainNode>());
+    trackChain->setEq(std::make_shared<EqNode>());
     trackChain->setControl(controlNode);
     trackChain->setSignal(std::make_shared<SignalNode>());
     trackChain->rebuild();
@@ -312,6 +315,7 @@ RetVal2<TrackId, TrackParams> AudioContext::addSoundTrack(const std::string& tra
     trackChain->setSource(source);
     trackChain->setFxChain(nullptr); // will be added later
     trackChain->setGain(std::make_shared<GainNode>());
+    trackChain->setEq(std::make_shared<EqNode>());
     trackChain->setControl(controlNode);
     trackChain->setSignal(std::make_shared<SignalNode>());
     trackChain->rebuild();
@@ -385,6 +389,10 @@ void AudioContext::onControlParamsChanged(Track& track, const ControlParams& par
 
     if (auto gain = track.chain->gain()) {
         gain->setGain(params.gain.raw());
+    }
+
+    if (auto eq = track.chain->eq()) {
+        eq->setParams(params.eq);
     }
 
     track.params.control = params;

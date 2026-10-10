@@ -56,6 +56,10 @@ template<typename T>
 void pack_custom(muse::msgpack::Packer& p, const muse::audio::AutomatableValue<T>& value);
 template<typename T>
 void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::AutomatableValue<T>& value);
+void pack_custom(muse::msgpack::Packer& p, const muse::audio::EqBandParams& value);
+void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::EqBandParams& value);
+void pack_custom(muse::msgpack::Packer& p, const muse::audio::EqParams& value);
+void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::EqParams& value);
 void pack_custom(muse::msgpack::Packer& p, const muse::audio::ControlParams& value);
 void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::ControlParams& value);
 void pack_custom(muse::msgpack::Packer& p, const muse::audio::TrackParams& value);
@@ -268,14 +272,42 @@ inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::AutomatableVa
     }
 }
 
+inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::EqBandParams& value)
+{
+    p.process(static_cast<int>(value.type), value.frequency, value.gain, value.q, value.enabled);
+}
+
+inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::EqBandParams& value)
+{
+    int type = 0;
+    p.process(type, value.frequency, value.gain, value.q, value.enabled);
+    value.type = static_cast<muse::audio::EqBandType>(type);
+}
+
+inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::EqParams& value)
+{
+    for (const muse::audio::EqBandParams& band : value.bands) {
+        p.process(band);
+    }
+    p.process(value.enabled);
+}
+
+inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::EqParams& value)
+{
+    for (muse::audio::EqBandParams& band : value.bands) {
+        p.process(band);
+    }
+    p.process(value.enabled);
+}
+
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::ControlParams& value)
 {
-    p.process(value.volume, value.balance, value.muted, value.gain);
+    p.process(value.volume, value.balance, value.muted, value.gain, value.eq);
 }
 
 inline void unpack_custom(muse::msgpack::UnPacker& p, muse::audio::ControlParams& value)
 {
-    p.process(value.volume, value.balance, value.muted, value.gain);
+    p.process(value.volume, value.balance, value.muted, value.gain, value.eq);
 }
 
 inline void pack_custom(muse::msgpack::Packer& p, const muse::audio::TrackParams& value)

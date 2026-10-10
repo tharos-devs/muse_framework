@@ -196,12 +196,27 @@ TEST_F(Audio_RpcPackerTests, ControlParams)
     origin.balance = balance_t(0.5f);
     origin.muted = true;
     origin.gain = volume_db_t(3.f);
+    origin.eq.bands[0] = { EqBandType::HighPass2, 80.f, 0.f, 1.f, true };
+    origin.eq.bands[2] = { EqBandType::Parametric1, 2500.f, -6.5f, 3.f, false };
+    origin.eq.enabled = false;
 
     KNOWN_FIELDS(origin,
                  origin.volume,
                  origin.balance,
                  origin.muted,
-                 origin.gain);
+                 origin.gain,
+                 origin.eq);
+
+    KNOWN_FIELDS(origin.eq,
+                 origin.eq.bands,
+                 origin.eq.enabled);
+
+    KNOWN_FIELDS(origin.eq.bands[0],
+                 origin.eq.bands[0].type,
+                 origin.eq.bands[0].frequency,
+                 origin.eq.bands[0].gain,
+                 origin.eq.bands[0].q,
+                 origin.eq.bands[0].enabled);
 
     ByteArray data = rpc::RpcPacker::pack(origin);
 

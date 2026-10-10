@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <array>
 #include <map>
 #include <variant>
 #include <set>
@@ -441,6 +442,104 @@ static constexpr balance_t BALANCE_MAX = balance_t::make(1.f);
 static constexpr volume_db_t GAIN_DB_MIN = volume_db_t::make(-24.f);
 static constexpr volume_db_t GAIN_DB_MAX = volume_db_t::make(24.f);
 
+//! NOTE The channel EQ: 4 bands applied to a track's signal right after its gain, before its Audio FX chain
+//! (see TrackChain::rebuild()). Its filters are computed by channeleq.h, for the sound and for its display
+enum class EqBandType {
+    Parametric1 = 0,
+    Parametric2,
+    LowShelf1,
+    LowShelf2,
+    LowShelf3,
+    LowShelf4,
+    HighShelf1,
+    HighShelf2,
+    HighShelf3,
+    HighShelf4,
+    HighPass1,
+    HighPass2,
+    LowPass1,
+    LowPass2,
+};
+
+static constexpr size_t EQ_BAND_COUNT = 4;
+static constexpr float EQ_FREQUENCY_MIN = 20.f;
+static constexpr float EQ_FREQUENCY_MAX = 20000.f;
+static constexpr float EQ_GAIN_DB_MIN = -24.f;
+static constexpr float EQ_GAIN_DB_MAX = 24.f;
+static constexpr float EQ_Q_MIN = 0.1f;
+static constexpr float EQ_Q_MAX = 12.f;
+
+struct EqBandParams {
+    EqBandType type = EqBandType::Parametric2;
+    float frequency = 1000.f; // Hz
+    float gain = 0.f; // dB
+    float q = 1.f;
+    bool enabled = true;
+
+    bool operator ==(const EqBandParams& other) const
+    {
+        return type == other.type
+               && RealIsEqual(frequency, other.frequency)
+               && RealIsEqual(gain, other.gain)
+               && RealIsEqual(q, other.q)
+               && enabled == other.enabled;
+    }
+
+    bool operator !=(const EqBandParams& other) const
+    {
+        return !(*this == other);
+    }
+};
+
+using EqBands = std::array<EqBandParams, EQ_BAND_COUNT>;
+
+inline EqBands defaultEqBands()
+{
+    EqBands bands;
+    bands[0] = { EqBandType::LowShelf2, 100.f, 0.f, 1.f, true };
+    bands[1] = { EqBandType::Parametric2, 800.f, 0.f, 1.f, true };
+    bands[2] = { EqBandType::Parametric2, 2000.f, 0.f, 1.f, true };
+    bands[3] = { EqBandType::HighShelf2, 12000.f, 0.f, 1.f, true };
+    return bands;
+}
+
+inline bool isEqPassType(EqBandType type)
+{
+    return type == EqBandType::HighPass1 || type == EqBandType::HighPass2
+           || type == EqBandType::LowPass1 || type == EqBandType::LowPass2;
+}
+
+struct EqParams {
+    EqBands bands = defaultEqBands();
+    bool enabled = true;
+
+    //! NOTE Leaves the signal unchanged: off, or every band off or at 0 dB (pass filters always change it)
+    bool isFlat() const
+    {
+        if (!enabled) {
+            return true;
+        }
+
+        for (const EqBandParams& band : bands) {
+            if (band.enabled && (isEqPassType(band.type) || !RealIsNull(band.gain))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool operator ==(const EqParams& other) const
+    {
+        return bands == other.bands && enabled == other.enabled;
+    }
+
+    bool operator !=(const EqParams& other) const
+    {
+        return !(*this == other);
+    }
+};
+
 struct ControlParams {
     AutomatableValue<volume_db_t> volume;
     AutomatableValue<balance_t> balance;
@@ -448,13 +547,16 @@ struct ControlParams {
     //! input trim applied pre-FX - it has no automation support, hence a plain value here
     volume_db_t gain = 0.f;
     bool muted = false;
+    //! NOTE Applied right after gain, not automated either
+    EqParams eq;
 
     bool operator ==(const ControlParams& other) const
     {
         return muted == other.muted
                && volume == other.volume
                && balance == other.balance
-               && gain == other.gain;
+               && gain == other.gain
+               && eq == other.eq;
     }
 
     bool operator !=(const ControlParams& other) const

@@ -100,6 +100,8 @@ else()
         internal/nodes/controlnode.h
         internal/nodes/gainnode.cpp
         internal/nodes/gainnode.h
+        internal/nodes/eqnode.cpp
+        internal/nodes/eqnode.h
         internal/nodes/signalnode.cpp
         internal/nodes/signalnode.h
         internal/nodes/playheadnode.cpp
