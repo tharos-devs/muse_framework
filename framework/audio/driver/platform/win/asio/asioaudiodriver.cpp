@@ -371,6 +371,16 @@ static long s_asioMessages(long selector, long value, void* /*message*/, double*
     return ret;
 }
 
+static void dispose_asio_buffers()
+{
+    ASIODisposeBuffers();
+
+    delete[] s_adata.bufferInfos;
+    s_adata.bufferInfos = nullptr;
+    delete[] s_adata.channelInfos;
+    s_adata.channelInfos = nullptr;
+}
+
 static ASIOError create_asio_buffers(long bufferSize, long outputChannels, long inputChannels = 0)
 {
     // Create buffer info array
@@ -408,11 +418,7 @@ static ASIOError create_asio_buffers(long bufferSize, long outputChannels, long 
         result = ASIOGetChannelInfo(&s_adata.channelInfos[i]);
         if (result != ASE_OK) {
             LOGE() << "failed get channels info";
-            delete[] s_adata.channelInfos;
-            s_adata.channelInfos = nullptr;
-            ASIODisposeBuffers();
-            delete[] s_adata.bufferInfos;
-            s_adata.bufferInfos = nullptr;
+            dispose_asio_buffers();
             return result;
         }
     }
@@ -562,11 +568,7 @@ bool AsioAudioDriver::open(const Spec& spec, Spec* activeSpec)
     ok = ASIOStart() == ASE_OK;
     if (!ok) {
         LOGE() << "failed asio start, driver: " << name;
-        ASIODisposeBuffers();
-        delete[] s_adata.bufferInfos;
-        s_adata.bufferInfos = nullptr;
-        delete[] s_adata.channelInfos;
-        s_adata.channelInfos = nullptr;
+        dispose_asio_buffers();
         return fail();
     }
 
@@ -597,12 +599,7 @@ void AsioAudioDriver::doClose()
     m_running = false;
 
     ASIOStop();
-    ASIODisposeBuffers();
-
-    delete[] s_adata.bufferInfos;
-    s_adata.bufferInfos = nullptr;
-    delete[] s_adata.channelInfos;
-    s_adata.channelInfos = nullptr;
+    dispose_asio_buffers();
 
     // don't use
     // ASIOExit();
@@ -679,8 +676,8 @@ static long probeDriver(long index, const std::string& name)
     IASIO* driver = 0;
     LONG ret = s_adata.drivers->asioOpenDriver(index, (void**)&driver);
     if (ret == DRVERR_DEVICE_ALREADY_OPEN) {
-        // the opened one, whose channels open() has stored
-        return 2;
+        // the loaded one
+        return s_adata.deviceMetrics.outputChannels;
     }
 
     long outputChannels = -1;

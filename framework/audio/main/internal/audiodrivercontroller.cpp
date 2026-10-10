@@ -400,6 +400,10 @@ bool AudioDriverController::selectOutputDevice(const AudioDeviceID& deviceId)
         spec.output = configuration()->desiredOutputSpec();
 
         LOGI() << "Trying to open output device: " << spec;
+
+        // not opened doesn't mean closed: e.g. WASAPI's audio thread, ended by a failed start or still starting,
+        // must be joined before another open starts a new one
+        m_audioDriver->close();
         return m_audioDriver->open(spec, nullptr);
     }
 
