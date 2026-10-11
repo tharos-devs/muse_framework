@@ -140,10 +140,33 @@ Ret Mixer::removeTrack(const TrackId trackId)
     return removed ? make_ret(Ret::Code::Ok) : make_ret(Err::InvalidTrackId);
 }
 
+//! NOTE: whether two sets of aux sends feed the same buses - only that matters for the bus process order
+static bool feedSameAuxBuses(const AuxSendsParams& a, const AuxSendsParams& b)
+{
+    auto feeds = [](const AuxSendsParams& sends, size_t idx) {
+        return idx < sends.size() && sends[idx].active && !muse::is_zero(sends[idx].signalAmount);
+    };
+
+    for (size_t i = 0; i < std::max(a.size(), b.size()); ++i) {
+        if (feeds(a, i) != feeds(b, i)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void Mixer::setAuxSends(const TrackId trackId, const AuxSendsParams& auxSends)
 {
     ONLY_AUDIO_ENGINE_THREAD;
-    m_auxSends[trackId] = auxSends;
+
+    AuxSendsParams& current = m_auxSends[trackId];
+    const bool routingChanged = !feedSameAuxBuses(current, auxSends);
+    current = auxSends;
+
+    if (!routingChanged) {
+        return;
+    }
 
     for (const TrackData& aux : m_auxTracks) {
         if (aux.chain && aux.trackId == trackId) {
