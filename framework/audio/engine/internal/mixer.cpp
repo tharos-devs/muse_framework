@@ -80,7 +80,7 @@ Ret Mixer::addTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends)
     return make_ok();
 }
 
-Ret Mixer::addAuxTrack(TrackChainPtr trackChain, bool isGroupBus, aux_channel_idx_t auxChannelIndex)
+Ret Mixer::addAuxTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends, bool isGroupBus, aux_channel_idx_t auxChannelIndex)
 {
     ONLY_AUDIO_ENGINE_THREAD;
     const size_t outBufferSize = m_outputSpec.samplesPerChannel * m_outputSpec.audioChannelCount;
@@ -99,7 +99,10 @@ Ret Mixer::addAuxTrack(TrackChainPtr trackChain, bool isGroupBus, aux_channel_id
     if (m_auxTracks.size() <= auxChannelIndex) {
         m_auxTracks.resize(auxChannelIndex + 1);
     }
+    m_auxSends[trackData.trackId] = auxSends;
     m_auxTracks[auxChannelIndex] = std::move(trackData);
+
+    updateAuxProcessOrder();
 
     return make_ok();
 }
@@ -127,6 +130,11 @@ Ret Mixer::removeTrack(const TrackId trackId)
                 break;
             }
         }
+
+        if (removed) {
+            m_auxSends.erase(trackId);
+            updateAuxProcessOrder();
+        }
     }
 
     return removed ? make_ret(Ret::Code::Ok) : make_ret(Err::InvalidTrackId);
@@ -136,6 +144,86 @@ void Mixer::setAuxSends(const TrackId trackId, const AuxSendsParams& auxSends)
 {
     ONLY_AUDIO_ENGINE_THREAD;
     m_auxSends[trackId] = auxSends;
+
+    for (const TrackData& aux : m_auxTracks) {
+        if (aux.chain && aux.trackId == trackId) {
+            updateAuxProcessOrder();
+            break;
+        }
+    }
+}
+
+void Mixer::updateAuxProcessOrder()
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    const size_t count = m_auxTracks.size();
+
+    std::vector<size_t> pendingSourceCount(count, 0);
+    std::vector<std::vector<aux_channel_idx_t> > targets(count);
+
+    for (aux_channel_idx_t i = 0; i < count; ++i) {
+        if (!m_auxTracks.at(i).chain) {
+            continue;
+        }
+
+        const AuxSendsParams& auxSends = auxSendsOf(m_auxTracks.at(i).trackId);
+        for (aux_channel_idx_t j = 0; j < auxSends.size() && j < count; ++j) {
+            const AuxSendParams& send = auxSends.at(j);
+            if (j == i || !m_auxTracks.at(j).chain || !send.active || muse::is_zero(send.signalAmount)) {
+                continue;
+            }
+
+            targets[i].push_back(j);
+            ++pendingSourceCount[j];
+        }
+    }
+
+    m_auxProcessOrder.clear();
+    m_auxPosition.assign(count, -1);
+
+    std::vector<bool> placed(count, false);
+
+    auto findNext = [&](bool onlyReady) -> int {
+        for (aux_channel_idx_t i = 0; i < count; ++i) {
+            if (m_auxTracks.at(i).chain && !placed[i] && (!onlyReady || pendingSourceCount[i] == 0)) {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    //! NOTE: lowest index first among the buses whose sources are all placed. A routing loop (never built by
+    //! the UI, but a project file could hold one) is broken at its lowest bus: processAuxChannels() then
+    //! ignores every send going back up the order, so the signal can never feed back into itself
+    while (true) {
+        int next = findNext(true);
+        if (next < 0) {
+            next = findNext(false);
+        }
+
+        if (next < 0) {
+            break;
+        }
+
+        placed[next] = true;
+        m_auxPosition[next] = static_cast<int>(m_auxProcessOrder.size());
+        m_auxProcessOrder.push_back(static_cast<aux_channel_idx_t>(next));
+
+        for (aux_channel_idx_t target : targets[next]) {
+            if (pendingSourceCount[target] > 0) {
+                --pendingSourceCount[target];
+            }
+        }
+    }
+}
+
+const AuxSendsParams& Mixer::auxSendsOf(const TrackId trackId) const
+{
+    static const AuxSendsParams NO_SENDS;
+
+    auto it = m_auxSends.find(trackId);
+    return it != m_auxSends.end() ? it->second : NO_SENDS;
 }
 
 void Mixer::onOutputSpecChanged(const OutputSpec& spec)
@@ -325,7 +413,8 @@ void Mixer::prepareAuxBuffers(size_t outBufferSize)
     }
 }
 
-void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends)
+void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends,
+                                   int sourceAuxPosition)
 {
     for (aux_channel_idx_t auxIdx = 0; auxIdx < auxSends.size(); ++auxIdx) {
         if (auxIdx >= m_auxTracks.size()) {
@@ -350,13 +439,12 @@ void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSiz
             continue;
         }
 
-        const AuxSendParams& auxSend = auxSends.at(auxIdx);
-        if (!auxSend.active || muse::is_zero(auxSend.signalAmount)) {
+        if (!isAuxSendRoutable(auxSends, auxIdx, sourceAuxPosition)) {
             continue;
         }
 
         float* auxBuffer = aux.buffer.data();
-        float signalAmount = auxSend.signalAmount;
+        float signalAmount = auxSends.at(auxIdx).signalAmount;
 
         for (size_t i = 0; i < outBufferSize; ++i) {
             auxBuffer[i] += trackBuffer[i] * signalAmount;
@@ -371,7 +459,8 @@ void Mixer::processAuxChannels(float* buffer, samples_t samplesPerChannel)
 {
     const size_t outBufferSize = samplesPerChannel * m_outputSpec.audioChannelCount;
 
-    for (TrackData& aux : m_auxTracks) {
+    for (aux_channel_idx_t auxIdx : m_auxProcessOrder) {
+        TrackData& aux = m_auxTracks.at(auxIdx);
         if (!aux.chain || !aux.chain->fxChain()) {
             continue;
         }
@@ -397,17 +486,46 @@ void Mixer::processAuxChannels(float* buffer, samples_t samplesPerChannel)
 
         //! NOTE If the signal is silent, do not write to the output buffer
         SignalNodePtr signal = aux.chain->signal();
-        if (signal && !signal->isSilent()) {
+        if (!signal || signal->isSilent()) {
+            continue;
+        }
+
+        //! NOTE: a bus can itself send to other buses, with the same rules as a track (see process()) -
+        //! only to the ones processed after it, which still have to run this cycle
+        const AuxSendsParams& auxSends = auxSendsOf(aux.trackId);
+        const int position = m_auxPosition.at(auxIdx);
+
+        if (isSilencedByMutedGroupBus(auxSends, position)) {
+            continue;
+        }
+
+        if (!hasActiveGroupBusSend(auxSends, position)) {
             mixOutputFromChannel(buffer, auxBuffer, outBufferSize);
         }
+
+        writeTrackToAuxBuffers(auxBuffer, outBufferSize, auxSends, position);
     }
 }
 
-bool Mixer::hasActiveGroupBusSend(const AuxSendsParams& auxSends) const
+bool Mixer::isAuxSendRoutable(const AuxSendsParams& auxSends, aux_channel_idx_t auxIdx, int sourceAuxPosition) const
+{
+    if (auxIdx >= auxSends.size() || auxIdx >= m_auxTracks.size()) {
+        return false;
+    }
+
+    const AuxSendParams& send = auxSends.at(auxIdx);
+    if (!send.active || muse::is_zero(send.signalAmount)) {
+        return false;
+    }
+
+    //! NOTE: a track (no source position) can send to any bus, a bus only to the ones after it in the process order
+    return sourceAuxPosition < 0 || (auxIdx < m_auxPosition.size() && m_auxPosition.at(auxIdx) > sourceAuxPosition);
+}
+
+bool Mixer::hasActiveGroupBusSend(const AuxSendsParams& auxSends, int sourceAuxPosition) const
 {
     for (aux_channel_idx_t i = 0; i < auxSends.size() && i < m_auxTracks.size(); ++i) {
-        const AuxSendParams& send = auxSends.at(i);
-        if (send.active && !muse::is_zero(send.signalAmount) && m_auxTracks.at(i).isGroupBus) {
+        if (m_auxTracks.at(i).isGroupBus && isAuxSendRoutable(auxSends, i, sourceAuxPosition)) {
             return true;
         }
     }
@@ -415,22 +533,39 @@ bool Mixer::hasActiveGroupBusSend(const AuxSendsParams& auxSends) const
     return false;
 }
 
-bool Mixer::isSilencedByMutedGroupBus(const AuxSendsParams& auxSends) const
+bool Mixer::isSilencedByMutedGroupBus(const AuxSendsParams& auxSends, int sourceAuxPosition) const
 {
-    //! NOTE: a track is only ever routed to a single group bus (exclusive routing), so the
-    //! first active group send found is the one that determines whether the track is silent
-    for (aux_channel_idx_t i = 0; i < auxSends.size() && i < m_auxTracks.size(); ++i) {
-        const AuxSendParams& send = auxSends.at(i);
-        const TrackData& auxTrack = m_auxTracks.at(i);
-        if (!send.active || muse::is_zero(send.signalAmount) || !auxTrack.isGroupBus) {
-            continue;
+    //! NOTE: a track (or bus) is only ever routed to a single group bus (exclusive routing), so the
+    //! first active group send found is its way to master - and that group may itself be routed to
+    //! another group: any muted group along that chain silences it. Each step goes to a bus further
+    //! down the process order, so this always ends
+    const AuxSendsParams* sends = &auxSends;
+    int position = sourceAuxPosition;
+
+    while (true) {
+        const TrackData* group = nullptr;
+        aux_channel_idx_t groupIdx = 0;
+
+        for (aux_channel_idx_t i = 0; i < sends->size() && i < m_auxTracks.size(); ++i) {
+            if (m_auxTracks.at(i).isGroupBus && isAuxSendRoutable(*sends, i, position)) {
+                group = &m_auxTracks.at(i);
+                groupIdx = i;
+                break;
+            }
         }
 
-        AutomationControlNodePtr control = auxTrack.chain ? auxTrack.chain->control() : nullptr;
-        return control && control->muted();
-    }
+        if (!group || !group->chain) {
+            return false;
+        }
 
-    return false;
+        AutomationControlNodePtr control = group->chain->control();
+        if (control && control->muted()) {
+            return true;
+        }
+
+        sends = &auxSendsOf(group->trackId);
+        position = m_auxPosition.at(groupIdx);
+    }
 }
 
 std::string Mixer::dump() const

@@ -58,7 +58,7 @@ public:
     void init();
 
     Ret addTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends);
-    Ret addAuxTrack(TrackChainPtr trackChain, bool isGroupBus, aux_channel_idx_t auxChannelIndex);
+    Ret addAuxTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends, bool isGroupBus, aux_channel_idx_t auxChannelIndex);
     Ret removeTrack(const TrackId trackId);
 
     void setAuxSends(const TrackId trackId, const AuxSendsParams& auxSends);
@@ -80,10 +80,13 @@ private:
     void processTrackChannels(size_t outBufferSize, size_t samplesPerChannel);
     void mixOutputFromChannel(float* outBuffer, const float* inBuffer, size_t bufferSize) const;
     void prepareAuxBuffers(size_t outBufferSize);
-    void writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends);
+    void writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends, int sourceAuxPosition = -1);
     void processAuxChannels(float* buffer, samples_t samplesPerChannel);
-    bool hasActiveGroupBusSend(const AuxSendsParams& auxSends) const;
-    bool isSilencedByMutedGroupBus(const AuxSendsParams& auxSends) const;
+    bool hasActiveGroupBusSend(const AuxSendsParams& auxSends, int sourceAuxPosition = -1) const;
+    bool isSilencedByMutedGroupBus(const AuxSendsParams& auxSends, int sourceAuxPosition = -1) const;
+    bool isAuxSendRoutable(const AuxSendsParams& auxSends, aux_channel_idx_t auxIdx, int sourceAuxPosition) const;
+    const AuxSendsParams& auxSendsOf(const TrackId trackId) const;
+    void updateAuxProcessOrder();
 
     bool useMultithreading() const;
 
@@ -104,6 +107,11 @@ private:
     std::vector<TrackData> m_tracks;
     std::vector<TrackData> m_auxTracks;
     std::map<TrackId, AuxSendsParams> m_auxSends;
+
+    //! NOTE: a bus can send to other buses - each one is processed only once everything that feeds it was,
+    //! see updateAuxProcessOrder(). m_auxPosition is the inverse, per bus index (-1: no bus there)
+    std::vector<aux_channel_idx_t> m_auxProcessOrder;
+    std::vector<int> m_auxPosition;
 
     std::vector<IAudioTaskScheduler::Task> m_trackTasks;
 
