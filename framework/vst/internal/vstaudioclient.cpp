@@ -195,7 +195,7 @@ bool VstAudioClient::handleParamChange(const ParamChangeEvent& param)
     ensureActivity();
     addParamChange(param);
 
-    m_playingParams.push_back(param.paramId);
+    m_playingParams.insert(param.paramId);
 
     return true;
 }
@@ -230,6 +230,10 @@ void VstAudioClient::flushSound()
     }
 
     for (PluginParamId id : m_playingParams) {
+        if (m_paramsResetOnFlush.find(id) == m_paramsResetOnFlush.end()) {
+            continue;
+        }
+
         auto infoIt = m_pluginParamInfoMap.find(id);
         if (infoIt == m_pluginParamInfoMap.end()) {
             continue;
@@ -295,6 +299,11 @@ audio::samples_t VstAudioClient::process(float* output, samples_t samplesPerChan
     processOutputEvents();
 
     return samplesPerChannel;
+}
+
+void VstAudioClient::setParamsResetOnFlush(const std::unordered_set<PluginParamId>& params)
+{
+    m_paramsResetOnFlush = params;
 }
 
 ParamsMapping VstAudioClient::paramsMapping(const std::set<Steinberg::Vst::CtrlNumber>& controllers, int eventBus, int channel) const

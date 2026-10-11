@@ -115,6 +115,25 @@ void VstSynthesiser::initSequencer()
         mappingsByChannel.push_back(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS, m_params.midiPort, channel));
     }
 
+    //! NOTE: on a stop or a seek, only the pitch bend, the aftertouch and the pedals go back to rest: a note played
+    //! live then would be out of tune / pressed / held. The other CCs (e.g. CC1/CC11 of a sample library, silent at 0)
+    //! keep their last value; playback sends the start position's values anyway
+    static const std::vector<Steinberg::Vst::CtrlNumber> CONTROLLERS_RESET_ON_FLUSH {
+        Steinberg::Vst::kPitchBend, Steinberg::Vst::kAfterTouch, Steinberg::Vst::kCtrlSustainOnOff,
+        Steinberg::Vst::kCtrlSustenutoOnOff, Steinberg::Vst::kCtrlSoftPedalOnOff
+    };
+
+    std::unordered_set<PluginParamId> paramsResetOnFlush;
+    for (const ParamsMapping& mapping : mappingsByChannel) {
+        for (Steinberg::Vst::CtrlNumber ctrlNum : CONTROLLERS_RESET_ON_FLUSH) {
+            auto it = mapping.find(ctrlNum);
+            if (it != mapping.end()) {
+                paramsResetOnFlush.insert(it->second);
+            }
+        }
+    }
+    m_vstAudioClient->setParamsResetOnFlush(paramsResetOnFlush);
+
     m_sequencer.init(std::move(mappingsByChannel), m_useDynamicEvents, m_params.midiPort, m_params.midiChannel);
 }
 

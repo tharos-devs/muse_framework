@@ -21,6 +21,8 @@
  */
 #pragma once
 
+#include <unordered_set>
+
 #include "../ivstplugininstance.h"
 #include "../vsttypes.h"
 
@@ -55,6 +57,10 @@ public:
     audio::samples_t process(float* output, audio::samples_t samplesPerChannel, audio::samples_t playbackPositionSamples = 0);
 
     ParamsMapping paramsMapping(const std::set<Steinberg::Vst::CtrlNumber>& controllers, int eventBus, int channel) const;
+
+    //! NOTE: the params flushSound() puts back to their default (e.g. the pitch bend); the others (MIDI CCs such as
+    //! modulation or expression) keep their last value, so the instrument still sounds when played live after a stop
+    void setParamsResetOnFlush(const std::unordered_set<PluginParamId>& params);
 
     std::vector<String> eventInputBusNames() const;
     void setEventInputBus(int busIndex);
@@ -97,7 +103,8 @@ private:
     VstProcessMode m_processMode = VstProcessMode::kRealtime;
 
     std::unordered_map<size_t, VstEvent> m_playingNotes;
-    std::vector<PluginParamId> m_playingParams;
+    std::unordered_set<PluginParamId> m_playingParams;
+    std::unordered_set<PluginParamId> m_paramsResetOnFlush;
 
     std::unordered_map<PluginParamId, PluginParamInfo> m_pluginParamInfoMap;
 
