@@ -22,6 +22,7 @@
 
 #include "windowview.h"
 
+#include <QGuiApplication>
 #include <QQuickView>
 #include <QScreen>
 #include <QTimer>
@@ -423,6 +424,18 @@ void WindowView::resolveParentWindow()
     }
 
     setParentWindow(interactive()->topWindow());
+}
+
+//! NOTE: e.g. the secondary window kept on top (see DockWindow): a popup or a dialog would otherwise open behind it
+bool WindowView::hasVisibleStaysOnTopWindow(const QWindow* except)
+{
+    for (const QWindow* window : QGuiApplication::topLevelWindows()) {
+        if (window != except && window->isVisible() && window->flags().testFlag(Qt::WindowStaysOnTopHint)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 QScreen* WindowView::resolveScreen() const

@@ -89,6 +89,12 @@ void DialogView::beforeOpen()
     m_view->setModality(m_modal ? Qt::ApplicationModal : Qt::NonModal);
 #endif
 
+    //! NOTE: e.g. a confirmation asked from a window kept on top (the Track presets, the secondary window): on Windows,
+    //! below it, the modal dialog was hidden and blocked the whole app
+    if (m_modal) {
+        m_view->setFlag(Qt::WindowStaysOnTopHint, hasVisibleStaysOnTopWindow(m_view));
+    }
+
     //! NOTE ok will be if they call accept
     setRetCode(Ret::Code::Cancel);
 
