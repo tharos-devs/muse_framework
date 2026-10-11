@@ -187,6 +187,8 @@ protected:
     void setParentWindow(QWindow* window);
     void resolveParentWindow();
 
+    static bool hasVisibleStaysOnTopWindow(const QWindow* except);
+
     QScreen* resolveScreen() const;
     QRect currentScreenGeometry() const;
     virtual void updateGeometry() = 0;
