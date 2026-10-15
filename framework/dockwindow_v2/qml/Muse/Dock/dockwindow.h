@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <QPointer>
 #include <QQuickItem>
 #include <qqmlintegration.h>
 
@@ -145,6 +146,10 @@ private:
     void geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) override;
     void updatePolish() override;
 
+    //! NOTE: see geometryChange()
+    void rememberSidePanelWidths();
+    void restoreSidePanelWidths();
+
     void loadPageContent(const DockPageView* page);
     void loadToolBars(const DockPageView* page);
     void loadPanels(const DockPageView* page);
@@ -204,5 +209,8 @@ private:
     bool m_mainWindowActivatedLast = true;
     bool m_secondaryWindowOnTop = false;
     async::Notification m_secondaryWindowOpenChanged;
+
+    QList<QPair<QPointer<DockBase>, int> > m_sidePanelWidths;
+    bool m_sidePanelWidthsRestorePending = false;
 };
 }

@@ -859,6 +859,52 @@ void DockBase::applySizeConstraints()
     });
 }
 
+int DockBase::resizableLayoutWidth() const
+{
+    if (!m_dockWidget || m_floating || type() != DockType::Panel || !isOpen()) {
+        return -1;
+    }
+
+    KDDockWidgets::Core::Group* group = groupForDockWidget(m_dockWidget);
+    if (!group || !group->isInMainWindow()) {
+        return -1;
+    }
+
+    const QQuickItem* view = KDDockWidgets::QtQuick::asQQuickItem(group);
+    if (!view || !view->isVisible() || view->width() <= 0) {
+        return -1;
+    }
+
+    if (group->view()->minSize().width() >= group->view()->maxSizeHint().width()) {
+        return -1;
+    }
+
+    return static_cast<int>(view->width());
+}
+
+void DockBase::setLayoutWidth(int width)
+{
+    const int currentWidth = resizableLayoutWidth();
+    if (currentWidth < 0 || currentWidth == width) {
+        return;
+    }
+
+    const QQuickItem* view = KDDockWidgets::QtQuick::asQQuickItem(groupForDockWidget(m_dockWidget));
+    if (!view || !view->window()) {
+        return;
+    }
+
+    //! NOTE: see shrinkToMaximumSizeInLayout()
+    const QPointF center = view->mapToScene(QPointF(view->width() / 2, view->height() / 2));
+    const bool isInLeftHalf = center.x() < view->window()->width() / 2.0;
+
+    int left = 0;
+    int right = 0;
+    (isInLeftHalf ? right : left) = width - currentWidth;
+
+    m_dockWidget->resizeInLayout(left, 0, right, 0);
+}
+
 //! NOTE: KDDockWidgets applies a lowered maximum size to later resizes only: a dock already larger keeps its size.
 //! E.g. the Video panel dropped below the side panels was laid out with its wide minimum (sidebar beside the
 //! picture), widening their fixed width column, then given their width once there - the column stayed wide, and

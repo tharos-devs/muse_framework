@@ -232,10 +232,71 @@ void DockWindow::componentComplete()
 
 void DockWindow::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry)
 {
+    //! NOTE: the window made wider or narrower: the side panels the user can resize (e.g. a track list) keep their
+    //! width, the middle (the score) takes the difference. KDDockWidgets would give each one its share of it
+    //! (MainWindowOption_CentralWidgetGetsAllExtraSpace needs its own central frame, not our central dock). Their
+    //! widths are still the old ones here: the layout follows this item's size in the base call below, at once
+    //! (its items fill it, and it relays out on its size change): they're given back right after, before the
+    //! window is drawn
+    const bool widthChanged = !qFuzzyCompare(newGeometry.width(), oldGeometry.width());
+    if (widthChanged && oldGeometry.width() > 0) {
+        rememberSidePanelWidths();
+    }
+
     QQuickItem::geometryChange(newGeometry, oldGeometry);
 
-    if (m_currentPage && !qFuzzyCompare(newGeometry.width(), oldGeometry.width())) {
+    if (m_sidePanelWidthsRestorePending) {
+        restoreSidePanelWidths();
+    }
+
+    if (m_currentPage && widthChanged) {
         polish();
+    }
+}
+
+void DockWindow::rememberSidePanelWidths()
+{
+    if (m_sidePanelWidthsRestorePending || !m_currentPage || !window() || !window()->isVisible()
+        || KDDockWidgets::LayoutSaver::restoreInProgress()) {
+        return;
+    }
+
+    m_sidePanelWidths.clear();
+
+    for (DockPanelView* panel : m_currentPage->panels()) {
+        const Location location = m_currentPage->actualLocation(panel);
+        if (location != Location::Left && location != Location::Right) {
+            continue;
+        }
+
+        const int width = panel->resizableLayoutWidth();
+        if (width > 0) {
+            m_sidePanelWidths.push_back({ panel, width });
+        }
+    }
+
+    if (m_sidePanelWidths.isEmpty()) {
+        return;
+    }
+
+    m_sidePanelWidthsRestorePending = true;
+}
+
+void DockWindow::restoreSidePanelWidths()
+{
+    m_sidePanelWidthsRestorePending = false;
+
+    const QList<QPair<QPointer<DockBase>, int> > widths = std::move(m_sidePanelWidths);
+    m_sidePanelWidths.clear();
+
+    if (KDDockWidgets::LayoutSaver::restoreInProgress()) {
+        return;
+    }
+
+    for (const auto& [panel, width] : widths) {
+        if (panel) {
+            panel->setLayoutWidth(width);
+        }
     }
 }
 

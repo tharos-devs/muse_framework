@@ -148,6 +148,13 @@ public:
     Q_INVOKABLE void close();
     Q_INVOKABLE void resize(int width, int height);
 
+    //! NOTE: a panel the user can make wider or narrower, docked in its window's layout: its width there, or -1
+    //! (closed, floating, fixed width...). See DockWindow::geometryChange()
+    int resizableLayoutWidth() const;
+    //! NOTE: back to that width in the layout, from its edge facing the middle of the window (its neighbours there
+    //! give or take the difference, as far as their own sizes allow)
+    void setLayoutWidth(int width);
+
     ui::INavigationSection* navigationSection() const;
     ui::NavigationSection* navigationSection_property() const;
     int contentNavigationPanelOrderStart() const;
