@@ -52,6 +52,10 @@ public:
 
     virtual bool isBusy() const = 0;
 
+    //! NOTE: drops the tasks not run yet (e.g. a project's loading cancelled: it's closed next), not the one
+    //! running. A plugin whose loading task is dropped stays unloaded
+    virtual void cancelPending() = 0;
+
     //! NOTE: the plugin whose task is about to run
     virtual async::Channel<std::string> taskStarting() const = 0;
     //! NOTE: a task enqueued with completesPluginLoading has run

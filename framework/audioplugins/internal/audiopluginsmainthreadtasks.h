@@ -35,6 +35,7 @@ public:
     void enqueue(const std::string& pluginName, const Task& task, bool completesPluginLoading = false) override;
 
     bool isBusy() const override;
+    void cancelPending() override;
 
     async::Channel<std::string> taskStarting() const override;
     async::Channel<std::string> pluginLoaded() const override;
