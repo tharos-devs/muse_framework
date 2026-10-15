@@ -57,6 +57,16 @@ bool AudioPluginsMainThreadTasks::isBusy() const
     return m_scheduled;
 }
 
+void AudioPluginsMainThreadTasks::cancelPending()
+{
+    if (!m_tasks.empty()) {
+        LOGI() << "cancelled " << m_tasks.size() << " pending plugin main thread tasks";
+    }
+
+    //! NOTE: a task already scheduled finds the queue empty (see scheduleNext())
+    m_tasks.clear();
+}
+
 void AudioPluginsMainThreadTasks::scheduleNext()
 {
     if (m_tasks.empty()) {
@@ -68,6 +78,12 @@ void AudioPluginsMainThreadTasks::scheduleNext()
     m_taskStarting.send(m_tasks.front().pluginName);
 
     QTimer::singleShot(TASK_GAP_MS, &m_timerContext, [this]() {
+        //! NOTE: cancelled meanwhile (see cancelPending())
+        if (m_tasks.empty()) {
+            m_scheduled = false;
+            return;
+        }
+
         const QueuedTask queued = std::move(m_tasks.front());
         m_tasks.pop_front();
 

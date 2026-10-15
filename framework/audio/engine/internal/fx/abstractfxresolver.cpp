@@ -22,6 +22,8 @@
 
 #include "abstractfxresolver.h"
 
+#include <set>
+
 #include "log.h"
 
 using namespace muse::audio;
@@ -184,44 +186,57 @@ void AbstractFxResolver::fxChainToCreate(const AudioFxChain& currentFxChain,
 AbstractFxResolver::FxMap AbstractFxResolver::relocateMovedFx(FxMap& fxMap, AudioFxChain& currentFxChain, const AudioFxChain& newFxChain)
 {
     std::vector<std::pair<AudioFxChainOrder, AudioFxChainOrder> > moves;
+    std::set<AudioFxChainOrder> decided; // instances staying or moving
 
-    for (const auto& pair : fxMap) {
-        AudioFxChainOrder oldOrder = pair.first;
-        const AudioResourceMeta& resourceMeta = pair.second->params().resourceMeta;
-
-        auto sameSpotIt = newFxChain.find(oldOrder);
-        if (sameSpotIt != newFxChain.cend() && sameSpotIt->second.resourceMeta == resourceMeta) {
-            continue; // still at the same position, nothing to relocate
+    auto isClaimed = [&moves](AudioFxChainOrder newOrder) {
+        for (const auto& move : moves) {
+            if (move.second == newOrder) {
+                return true;
+            }
         }
+        return false;
+    };
 
-        for (const auto& newPair : newFxChain) {
-            AudioFxChainOrder newOrder = newPair.first;
-            if (newOrder == oldOrder || newPair.second.resourceMeta != resourceMeta) {
+    //! NOTE: two passes: an instance first goes where the same effect with the same settings is (e.g. a copy of
+    //! it, with other settings, put in its place: it goes with its own settings), then where the same effect is
+    //! (its settings changed meanwhile, not echoed yet)
+    for (const bool sameSettings : { true, false }) {
+        for (const auto& pair : fxMap) {
+            AudioFxChainOrder oldOrder = pair.first;
+            if (decided.find(oldOrder) != decided.cend()) {
                 continue;
             }
 
-            bool newOrderAlreadyClaimed = false;
-            for (const auto& move : moves) {
-                if (move.second == newOrder) {
-                    newOrderAlreadyClaimed = true;
-                    break;
+            const AudioFxParams& params = pair.second->params();
+            auto matches = [&params, sameSettings](const AudioFxParams& other) {
+                return other.resourceMeta == params.resourceMeta && (!sameSettings || other.configuration == params.configuration);
+            };
+
+            auto sameSpotIt = newFxChain.find(oldOrder);
+            if (sameSpotIt != newFxChain.cend() && matches(sameSpotIt->second) && !isClaimed(oldOrder)) {
+                decided.insert(oldOrder); // still at the same position, nothing to relocate
+                continue;
+            }
+
+            for (const auto& newPair : newFxChain) {
+                AudioFxChainOrder newOrder = newPair.first;
+                if (newOrder == oldOrder || !matches(newPair.second) || isClaimed(newOrder)) {
+                    continue;
                 }
-            }
-            if (newOrderAlreadyClaimed) {
-                continue;
-            }
 
-            // That position may already be correctly occupied by another
-            // live instance of the same resource (e.g. two identical fx of
-            // the same type sitting right next to each other) -- leave it
-            // alone rather than relocating on top of it.
-            auto occupantIt = currentFxChain.find(newOrder);
-            if (occupantIt != currentFxChain.cend() && occupantIt->second.resourceMeta == resourceMeta) {
-                continue;
-            }
+                // That position may already be correctly occupied by another
+                // live instance of the same resource (e.g. two identical fx of
+                // the same type sitting right next to each other) -- leave it
+                // alone rather than relocating on top of it.
+                auto occupantIt = currentFxChain.find(newOrder);
+                if (occupantIt != currentFxChain.cend() && matches(occupantIt->second)) {
+                    continue;
+                }
 
-            moves.emplace_back(oldOrder, newOrder);
-            break;
+                moves.emplace_back(oldOrder, newOrder);
+                decided.insert(oldOrder);
+                break;
+            }
         }
     }
 
