@@ -138,6 +138,7 @@ public:
         ONLY_AUDIO_ENGINE_THREAD;
 
         m_playbackPosition = newPlaybackPosition;
+        m_justSeeked = true;
         resetAllIterators();
     }
 
@@ -184,14 +185,16 @@ public:
         }
 
         // Empty sequence means to continue the previous sequence
-        result.emplace(m_playbackPosition, EventSequence());
+        const msecs_t blockStart = m_playbackPosition;
+        result.emplace(blockStart, EventSequence());
         m_playbackPosition += nextMsecs;
+        m_justSeeked = false;
 
         if (m_currentMainSequenceIt == m_mainStreamEvents.cend()) {
             return result;
         }
 
-        handleMainStream(result);
+        handleMainStream(result, blockStart);
 
         return result;
     }
@@ -206,9 +209,16 @@ protected:
         updateOffSequenceIterator();
     }
 
+    //! NOTE: a seek position goes through a rounding to the nearest sample (TimePosition::fromTime) and the events'
+    //! timestamps through a truncation to the microsecond, so the position can land a few microseconds after
+    //! the events it was asked for (e.g. playing from a selected note): they would never be played. Only until
+    //! the first block after the seek: later, the events just before the position were already played
+    static constexpr int64_t SEEK_TOLERANCE_US = 100;
+
     void updateMainSequenceIterator()
     {
-        m_currentMainSequenceIt = m_mainStreamEvents.lower_bound(m_playbackPosition);
+        const msecs_t from = m_justSeeked ? m_playbackPosition - msecs_t(SEEK_TOLERANCE_US) : m_playbackPosition;
+        m_currentMainSequenceIt = m_mainStreamEvents.lower_bound(from);
     }
 
     void updateOffSequenceIterator()
@@ -217,11 +227,12 @@ protected:
         m_offstreamPosition = 0;
     }
 
-    void handleMainStream(EventSequenceMap& result)
+    void handleMainStream(EventSequenceMap& result, const msecs_t blockStart)
     {
         while (m_currentMainSequenceIt != m_mainStreamEvents.end()
                && m_currentMainSequenceIt->first <= m_playbackPosition) {
-            EventSequence& sequence = result[m_currentMainSequenceIt->first];
+            //! NOTE: events just before the block (see SEEK_TOLERANCE_US) are played at its start
+            EventSequence& sequence = result[std::max(m_currentMainSequenceIt->first, blockStart)];
             sequence.insert(sequence.end(), m_currentMainSequenceIt->second.cbegin(),
                             m_currentMainSequenceIt->second.cend());
             m_currentMainSequenceIt = std::next(m_currentMainSequenceIt);
@@ -248,6 +259,7 @@ protected:
     }
 
     mutable msecs_t m_playbackPosition = 0;
+    bool m_justSeeked = false;
     mutable msecs_t m_offstreamPosition = 0;
 
     SequenceIterator m_currentMainSequenceIt;
