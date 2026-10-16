@@ -165,6 +165,7 @@ void VstSynthesiser::setMidiRouting(int port, int channel)
     // The articulation/CC state now has to reach the new channel
     if (m_sequencer.isActive()) {
         m_midiStateChasePending = true;
+        m_midiStateChaseAfterSeek = false;
     }
 }
 
@@ -287,6 +288,7 @@ void VstSynthesiser::setPlaybackPosition(const muse::audio::TimePosition& positi
     if (m_sequencer.isActive()) {
         m_vstAudioClient->setVolumeGain(m_sequencer.currentGain());
         m_midiStateChasePending = true;
+        m_midiStateChaseAfterSeek = true;
     }
 }
 
@@ -399,7 +401,11 @@ void VstSynthesiser::applyMidiStateChase(VstSequencer::EventSequenceMap& sequenc
     m_pendingChaseOffEvents.clear();
 
     VstSequencer::EventSequence onEvents;
-    m_sequencer.midiStateBefore(sequences.begin()->first, onEvents, m_pendingChaseOffEvents);
+    //! NOTE: after a seek, not the state of the events the main stream plays again (see SEEK_TOLERANCE_US): their
+    //! keyswitches would be sent twice
+    const msecs_t chasedUntil = m_midiStateChaseAfterSeek ? sequences.begin()->first - msecs_t(VstSequencer::SEEK_TOLERANCE_US)
+                                : sequences.begin()->first;
+    m_sequencer.midiStateBefore(chasedUntil, onEvents, m_pendingChaseOffEvents);
     firstSequence.insert(firstSequence.begin(), onEvents.cbegin(), onEvents.cend());
     firstSequence.insert(firstSequence.begin(), staleOffEvents.cbegin(), staleOffEvents.cend());
 }

@@ -36,6 +36,12 @@ template<class ... Types>
 class AbstractEventSequencer : public async::Asyncable
 {
 public:
+    //! NOTE: a seek position goes through a rounding to the nearest sample (TimePosition::fromTime) and the events'
+    //! timestamps through a truncation to the microsecond, so the position can land a few microseconds after
+    //! the events it was asked for (e.g. playing from a selected note): they would never be played. Only until
+    //! the first block after the seek: later, the events just before the position were already played
+    static constexpr int64_t SEEK_TOLERANCE_US = 100;
+
     using EventType = std::variant<Types...>;
     using EventSequence = std::vector<EventType>;
     using EventSequenceMap = std::map<msecs_t, EventSequence>;
@@ -138,7 +144,7 @@ public:
         ONLY_AUDIO_ENGINE_THREAD;
 
         m_playbackPosition = newPlaybackPosition;
-        m_justSeeked = true;
+        m_seekPending = true;
         resetAllIterators();
     }
 
@@ -188,7 +194,7 @@ public:
         const msecs_t blockStart = m_playbackPosition;
         result.emplace(blockStart, EventSequence());
         m_playbackPosition += nextMsecs;
-        m_justSeeked = false;
+        m_seekPending = false;
 
         if (m_currentMainSequenceIt == m_mainStreamEvents.cend()) {
             return result;
@@ -209,15 +215,9 @@ protected:
         updateOffSequenceIterator();
     }
 
-    //! NOTE: a seek position goes through a rounding to the nearest sample (TimePosition::fromTime) and the events'
-    //! timestamps through a truncation to the microsecond, so the position can land a few microseconds after
-    //! the events it was asked for (e.g. playing from a selected note): they would never be played. Only until
-    //! the first block after the seek: later, the events just before the position were already played
-    static constexpr int64_t SEEK_TOLERANCE_US = 100;
-
     void updateMainSequenceIterator()
     {
-        const msecs_t from = m_justSeeked ? m_playbackPosition - msecs_t(SEEK_TOLERANCE_US) : m_playbackPosition;
+        const msecs_t from = m_seekPending ? m_playbackPosition - msecs_t(SEEK_TOLERANCE_US) : m_playbackPosition;
         m_currentMainSequenceIt = m_mainStreamEvents.lower_bound(from);
     }
 
@@ -259,7 +259,7 @@ protected:
     }
 
     mutable msecs_t m_playbackPosition = 0;
-    bool m_justSeeked = false;
+    bool m_seekPending = false;
     mutable msecs_t m_offstreamPosition = 0;
 
     SequenceIterator m_currentMainSequenceIt;

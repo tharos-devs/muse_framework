@@ -90,6 +90,8 @@ private:
     audio::TimePosition m_currentPosition;
 
     bool m_midiStateChasePending = false;
+    //! NOTE: the chase is the one of a seek (see applyMidiStateChase())
+    bool m_midiStateChaseAfterSeek = false;
 
     static constexpr double DEACTIVATION_DELAY_SECS = 1.0;
     //! NOTE: samples left before the plugin is deactivated after stopping (0 = none pending)
