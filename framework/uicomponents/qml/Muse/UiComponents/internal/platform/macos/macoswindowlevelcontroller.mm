@@ -44,5 +44,31 @@ void MacOSWindowLevelController::setAlwaysAboveApp(QWindow* window)
         return;
     }
     [nsWindow setLevel:NSFloatingWindowLevel];
-    [nsWindow setHidesOnDeactivate:YES];
+
+    //! NOTE: stays shown when the app is inactive (e.g. a plugin's window next to another app's window)
+    [nsWindow setHidesOnDeactivate:NO];
+}
+
+void MacOSWindowLevelController::setFloating(QWindow* window, bool floating)
+{
+    NSWindow* nsWindow = nsWindowForQWindow(window);
+    if (!nsWindow) {
+        return;
+    }
+
+    [nsWindow setLevel:floating ? NSFloatingWindowLevel : NSNormalWindowLevel];
+}
+
+void MacOSWindowLevelController::setOrderedOut(QWindow* window, bool orderedOut)
+{
+    NSWindow* nsWindow = nsWindowForQWindow(window);
+    if (!nsWindow) {
+        return;
+    }
+
+    if (orderedOut) {
+        [nsWindow orderOut:nil];
+    } else {
+        [nsWindow orderFront:nil];
+    }
 }

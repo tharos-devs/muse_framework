@@ -22,6 +22,7 @@
 
 #include "dialogview.h"
 
+#include <QGuiApplication>
 #include <QQuickView>
 #include <QScreen>
 
@@ -113,6 +114,24 @@ void DialogView::afterShow()
 #ifdef Q_OS_MAC
     if (m_alwaysAboveApp) {
         MacOSWindowLevelController::setAlwaysAboveApp(m_view);
+
+        //! NOTE: above the app's windows only while the app is active: while another app is, the window stays shown,
+        //! behind that app's windows like the main window (on Windows, a window owned by the main window does that)
+        connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+            if (m_view && m_view->isVisible()) {
+                MacOSWindowLevelController::setFloating(m_view, state == Qt::ApplicationActive);
+            }
+        });
+
+        //! NOTE: a floating window doesn't follow the main window: hidden while it's minimized, like on Windows
+        if (m_parentWindow) {
+            connect(m_parentWindow, &QWindow::windowStateChanged, this, [this](Qt::WindowState state) {
+                // Not a closed dialog, waiting to be deleted
+                if (m_view && m_view->isVisible()) {
+                    MacOSWindowLevelController::setOrderedOut(m_view, state == Qt::WindowMinimized);
+                }
+            });
+        }
     }
 #endif
 }

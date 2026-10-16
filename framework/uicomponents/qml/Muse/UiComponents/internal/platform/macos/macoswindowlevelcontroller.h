@@ -27,6 +27,11 @@ namespace muse::uicomponents {
 class MacOSWindowLevelController
 {
 public:
+    //! NOTE: above the app's windows, and still shown while the app is inactive
     static void setAlwaysAboveApp(QWindow* window);
+    //! NOTE: above the app's windows, or at the normal level (e.g. behind another app's windows while it's active)
+    static void setFloating(QWindow* window, bool floating);
+    //! NOTE: removes the window from the screen without hiding it for Qt (which would close a dialog), or puts it back
+    static void setOrderedOut(QWindow* window, bool orderedOut);
 };
 }
