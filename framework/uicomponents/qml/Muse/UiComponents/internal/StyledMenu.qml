@@ -185,6 +185,11 @@ MenuView {
             onNavigationEvent: function(event) {
                 switch (event.type) {
                 case NavigationEvent.Right:
+                    //! NOTE Moves along the row of buttons (see MenuIconRowItem.qml)
+                    if (prv.isIconRowButtonActive()) {
+                        return
+                    }
+
                     var selectedItem = prv.selectedItem()
                     if (!Boolean(selectedItem) || !selectedItem.hasSubMenu) {
                        if (root.hasSiblingMenus)  {
@@ -374,7 +379,7 @@ MenuView {
                 var separatorCount = 0
                 for (let i = 0; i < model.length; i++) {
                     let item = Boolean(model.get) ? model.get(i).item : model[i]
-                    if (!Boolean(item.title)) {
+                    if (!Boolean(item.title) && !Boolean(item.iconRow)) {
                         separatorCount++
                     }
                 }
@@ -442,7 +447,18 @@ MenuView {
                 function focusOnFirstEnabled() {
                     for (var i = 0; i < listView.count; ++i) {
                         var loader = listView.itemAtIndex(i)
-                        if (loader && !loader.isSeparator && !loader.isIconRow && loader.item && loader.item.enabled) {
+                        if (!loader || loader.isSeparator || !loader.item) {
+                            continue
+                        }
+
+                        if (loader.isIconRow) {
+                            if (loader.item.requestActive()) {
+                                return true
+                            }
+                            continue
+                        }
+
+                        if (loader.item.enabled) {
                             loader.item.navigation.requestActive()
                             return true
                         }
@@ -515,8 +531,8 @@ MenuView {
                 required property int index
 
                 readonly property var modelData: Boolean(root.model.get) ? model.item : model.modelData
-                readonly property bool isSeparator: !(modelData?.title)
-                readonly property bool isIconRow: !isSeparator && Boolean(modelData?.iconRow)
+                readonly property bool isIconRow: Boolean(modelData?.iconRow)
+                readonly property bool isSeparator: !isIconRow && !(modelData?.title)
 
                 sourceComponent: isSeparator ? separatorComp : (isIconRow ? iconRowComp : menuItemComp)
 

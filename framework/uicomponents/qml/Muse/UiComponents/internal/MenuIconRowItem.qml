@@ -116,9 +116,10 @@ Item {
                 margins: root.textButtonMargins
                 minWidth: root.buttonSize
 
-                enabled: modelData.enabled
-                accentButton: modelData.checked
-                transparent: !modelData.checked
+                // default true, as for the other menu items
+                enabled: modelData.enabled !== false
+                accentButton: Boolean(modelData.checked)
+                transparent: !accentButton
 
                 icon: hasIcon ? modelData.icon : IconCode.NONE
                 text: hasIcon ? "" : modelData.title
