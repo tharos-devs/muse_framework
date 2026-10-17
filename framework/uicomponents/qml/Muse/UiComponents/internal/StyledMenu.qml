@@ -76,7 +76,7 @@ MenuView {
         let startingIndex = 0
         for (let i = 0; i < listView.count; ++i) {
             let loader = listView.itemAtIndex(i)
-            if (loader && !loader.isSeparator && loader.item && loader.item.navigation.active) {
+            if (loader && !loader.isSeparator && !loader.isIconRow && loader.item && loader.item.navigation.active) {
                 startingIndex = i + 1
                 break
             }
@@ -92,7 +92,7 @@ MenuView {
             }
 
             let item = Boolean(model.get) ? model.get(index).item : model[index]
-            if (item && item.enabled && requestingMenuModel.menuItemMatchesSymbol(item, symbol)) {
+            if (item && item.enabled && !item.iconRow && requestingMenuModel.menuItemMatchesSymbol(item, symbol)) {
                 if (firstMatchingIndex === -1) {
                     firstMatchingIndex = index
                 } else {
@@ -185,6 +185,11 @@ MenuView {
             onNavigationEvent: function(event) {
                 switch (event.type) {
                 case NavigationEvent.Right:
+                    //! NOTE Moves along the row of buttons (see MenuIconRowItem.qml)
+                    if (prv.isIconRowButtonActive()) {
+                        return
+                    }
+
                     var selectedItem = prv.selectedItem()
                     if (!Boolean(selectedItem) || !selectedItem.hasSubMenu) {
                        if (root.hasSiblingMenus)  {
@@ -201,6 +206,11 @@ MenuView {
 
                     break
                 case NavigationEvent.Left:
+                    //! NOTE Moves along the row of buttons (see MenuIconRowItem.qml)
+                    if (prv.isIconRowButtonActive()) {
+                        return
+                    }
+
                     if (root.isSubMenuOpen) {
                         root.subMenuLoader.close()
                         event.accepted = true
@@ -369,7 +379,7 @@ MenuView {
                 var separatorCount = 0
                 for (let i = 0; i < model.length; i++) {
                     let item = Boolean(model.get) ? model.get(i).item : model[i]
-                    if (!Boolean(item.title)) {
+                    if (!Boolean(item.title) && !Boolean(item.iconRow)) {
                         separatorCount++
                     }
                 }
@@ -437,7 +447,18 @@ MenuView {
                 function focusOnFirstEnabled() {
                     for (var i = 0; i < listView.count; ++i) {
                         var loader = listView.itemAtIndex(i)
-                        if (loader && !loader.isSeparator && loader.item && loader.item.enabled) {
+                        if (!loader || loader.isSeparator || !loader.item) {
+                            continue
+                        }
+
+                        if (loader.isIconRow) {
+                            if (loader.item.requestActive()) {
+                                return true
+                            }
+                            continue
+                        }
+
+                        if (loader.item.enabled) {
                             loader.item.navigation.requestActive()
                             return true
                         }
@@ -459,12 +480,47 @@ MenuView {
                 function selectedItem() {
                     for (var i = 0; i < listView.count; ++i) {
                         var loader = listView.itemAtIndex(i)
-                        if (loader && !loader.isSeparator && loader.item && loader.item.isSelected) {
+                        if (loader && !loader.isSeparator && !loader.isIconRow && loader.item && loader.item.isSelected) {
                             return loader.item
                         }
                     }
 
                     return null
+                }
+
+                function isIconRowButtonActive() {
+                    for (var i = 0; i < listView.count; ++i) {
+                        var loader = listView.itemAtIndex(i)
+                        if (loader && loader.isIconRow && loader.item && loader.item.hasActiveButton) {
+                            return true
+                        }
+                    }
+
+                    return false
+                }
+
+                //! NOTE: the next enabled item after (step 1) or before (step -1) this one, going round
+                function focusOnItemNextTo(index, step) {
+                    for (var i = 1; i < listView.count; ++i) {
+                        var nextIndex = (index + step * i + listView.count) % listView.count
+                        var loader = listView.itemAtIndex(nextIndex)
+                        if (!loader || loader.isSeparator || !loader.item) {
+                            continue
+                        }
+
+                        if (loader.isIconRow) {
+                            if (loader.item.requestActive()) {
+                                listView.positionViewAtIndex(nextIndex, ListView.Contain)
+                                return
+                            }
+                            continue
+                        }
+
+                        if (loader.item.enabled) {
+                            loader.item.navigation.requestActive()
+                            return
+                        }
+                    }
                 }
             }
 
@@ -475,9 +531,39 @@ MenuView {
                 required property int index
 
                 readonly property var modelData: Boolean(root.model.get) ? model.item : model.modelData
-                readonly property bool isSeparator: !(modelData?.title)
+                readonly property bool isIconRow: Boolean(modelData?.iconRow)
+                readonly property bool isSeparator: !isIconRow && !(modelData?.title)
 
-                sourceComponent: isSeparator ? separatorComp : menuItemComp
+                sourceComponent: isSeparator ? separatorComp : (isIconRow ? iconRowComp : menuItemComp)
+
+                Component {
+                    id: iconRowComp
+
+                    MenuIconRowItem {
+                        width: root.menuMetrics?.itemWidth ?? 0
+
+                        modelData: loader.modelData
+
+                        navigationPanel: content.navigationPanel
+                        navigationRow: root.isSearchable ? loader.index + 1 : loader.index
+
+                        onButtonHovered: {
+                            root.closeSubMenu()
+                        }
+
+                        onNavigateUpRequested: {
+                            prv.focusOnItemNextTo(loader.index, -1)
+                        }
+
+                        onNavigateDownRequested: {
+                            prv.focusOnItemNextTo(loader.index, 1)
+                        }
+
+                        onHandleMenuItem: function(itemId) {
+                            root.handleMenuItem(itemId)
+                        }
+                    }
+                }
 
                 Component {
                     id: menuItemComp

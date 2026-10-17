@@ -270,6 +270,21 @@ MenuItemList MenuItem::subitems() const
     return m_subitems;
 }
 
+void MenuItem::setIconRow(bool iconRow)
+{
+    if (m_iconRow == iconRow) {
+        return;
+    }
+
+    m_iconRow = iconRow;
+    emit itemChanged();
+}
+
+bool MenuItem::iconRow() const
+{
+    return m_iconRow;
+}
+
 bool MenuItem::isValid() const
 {
     return !m_id.isEmpty();

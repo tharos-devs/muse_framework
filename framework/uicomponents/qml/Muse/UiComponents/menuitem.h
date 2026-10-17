@@ -73,6 +73,8 @@ class MenuItem : public QObject, public async::Asyncable
     Q_PROPERTY(QString section READ section NOTIFY sectionChanged)
     Q_PROPERTY(int role READ role_property NOTIFY roleChanged)
     Q_PROPERTY(muse::uicomponents::MenuItemList subitems READ subitems NOTIFY subitemsChanged)
+    //! NOTE: the subitems shown as a row of buttons in place of this item, without a submenu (see MenuIconRowItem.qml)
+    Q_PROPERTY(bool iconRow READ iconRow NOTIFY itemChanged)
 
 public:
     MenuItem(QObject* parent = nullptr);
@@ -114,6 +116,8 @@ public:
     int role_property() const;
     void setSubitems(const MenuItemList& subitems);
     MenuItemList subitems() const;
+    void setIconRow(bool iconRow);
+    bool iconRow() const;
 
     bool isValid() const;
 
@@ -175,6 +179,7 @@ private:
     QString m_section;
     MenuItemRole m_role = MenuItemRole::NoRole;
     MenuItemList m_subitems;
+    bool m_iconRow = false;
 
     rcommand::Params m_params;
     muse::actions::ActionData m_args;
