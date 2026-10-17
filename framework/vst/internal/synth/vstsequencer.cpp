@@ -67,12 +67,70 @@ void VstSequencer::init(std::vector<ParamsMapping>&& mappingsByChannel, bool use
     updateMainStreamEvents(m_playbackData.originEvents, m_playbackData.dynamics);
 }
 
+void VstSequencer::setDelay(mpe::timestamp_t delay)
+{
+    if (m_delay == delay) {
+        return;
+    }
+
+    m_delay = delay;
+
+    if (m_inited) {
+        updateMainStreamEvents(m_playbackData.originEvents, m_playbackData.dynamics);
+    }
+}
+
+//! NOTE: a copy of the events, all shifted by the delay (none before the start: they're sent there)
+static mpe::PlaybackEventsMap delayedEvents(const mpe::PlaybackEventsMap& events, const mpe::timestamp_t delay)
+{
+    mpe::PlaybackEventsMap result;
+    for (const auto& [timestamp, eventList] : events) {
+        mpe::PlaybackEventList& delayedList = result[std::max(timestamp + delay, mpe::timestamp_t(0))];
+        for (const mpe::PlaybackEvent& event : eventList) {
+            const auto* noteEvent = std::get_if<mpe::NoteEvent>(&event);
+            if (!noteEvent) {
+                delayedList.push_back(event);
+                continue;
+            }
+
+            mpe::ArrangementContext arrangementCtx = noteEvent->arrangementCtx();
+            arrangementCtx.actualTimestamp = std::max(arrangementCtx.actualTimestamp + delay, mpe::timestamp_t(0));
+            delayedList.emplace_back(mpe::NoteEvent(std::move(arrangementCtx), mpe::PitchContext(noteEvent->pitchCtx()),
+                                                    mpe::ExpressionContext(noteEvent->expressionCtx())));
+        }
+    }
+
+    return result;
+}
+
+static mpe::DynamicAutomationLayers delayedDynamics(const mpe::DynamicAutomationLayers& dynamics, const mpe::timestamp_t delay)
+{
+    mpe::DynamicAutomationLayers result;
+    for (const auto& [layerIdx, curve] : dynamics) {
+        mpe::DynamicAutomationMap& delayedCurve = result[layerIdx];
+        for (const auto& [timestamp, point] : curve) {
+            delayedCurve[std::max(timestamp + delay, mpe::timestamp_t(0))] = point;
+        }
+    }
+
+    return result;
+}
+
 void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics)
 {
     if (!m_inited) {
         return;
     }
 
+    if (m_delay == 0) {
+        buildMainStreamEvents(events, dynamics);
+    } else {
+        buildMainStreamEvents(delayedEvents(events, m_delay), delayedDynamics(dynamics, m_delay));
+    }
+}
+
+void VstSequencer::buildMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics)
+{
     m_mainStreamEvents.clear();
     m_controllerStates.clear();
     m_liveOverrides.clear();
@@ -172,7 +230,8 @@ muse::audio::gain_t VstSequencer::currentGain() const
         }
 
         foundAnyLevel = true;
-        maxDynamicLevel = std::max(maxDynamicLevel, mpe::dynamicLevelFromNormalized(mpe::evaluateCurveAt(curve, m_playbackPosition)));
+        maxDynamicLevel
+            = std::max(maxDynamicLevel, mpe::dynamicLevelFromNormalized(mpe::evaluateCurveAt(curve, m_playbackPosition - m_delay)));
     }
 
     if (!foundAnyLevel) {

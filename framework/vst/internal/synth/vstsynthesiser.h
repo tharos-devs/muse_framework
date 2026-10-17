@@ -65,6 +65,7 @@ public:
 
     void setOutputSpec(const audio::OutputSpec& spec) override;
     void setMidiRouting(int port, int channel) override;
+    void setPlaybackDelay(int delayMs) override;
     muse::audio::samples_t process(float* buffer, muse::audio::samples_t samplesPerChannel) override;
 
 private:

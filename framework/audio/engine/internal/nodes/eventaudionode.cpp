@@ -128,12 +128,20 @@ void EventAudioNode::applyInputParams(const AudioInputParams& requiredParams)
         return;
     }
 
-    //! NOTE Only the MIDI routing changed: re-route the current synth instead of recreating it
+    //! NOTE Only the MIDI routing or the track delay changed: apply it to the current synth instead of recreating it
     //! (which would reload the plugin)
     if (m_synth && m_params.isValid() && m_synth->params().hasSameSource(requiredParams)) {
         const AudioInputParams& current = m_synth->params();
+        bool changed = false;
         if (current.midiPort != requiredParams.midiPort || current.midiChannel != requiredParams.midiChannel) {
             m_synth->setMidiRouting(requiredParams.midiPort, requiredParams.midiChannel);
+            changed = true;
+        }
+        if (m_synth->params().delayMs != requiredParams.delayMs) {
+            m_synth->setPlaybackDelay(requiredParams.delayMs);
+            changed = true;
+        }
+        if (changed) {
             m_params = m_synth->params();
             m_paramsChanges.send(m_params);
         }

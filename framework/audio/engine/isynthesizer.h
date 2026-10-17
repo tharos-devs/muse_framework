@@ -54,6 +54,9 @@ public:
     //! NOTE Event input bus and MIDI channel (0-based) of an event-driven instrument; ignored by default
     virtual void setMidiRouting(int /*port*/, int /*channel*/) {}
 
+    //! NOTE The track delay (see AudioSourceParams::delayMs) of an event-driven instrument; ignored by default
+    virtual void setPlaybackDelay(int /*delayMs*/) {}
+
     virtual TimePosition playbackPosition() const = 0;
     virtual void setPlaybackPosition(const TimePosition& position) = 0;
 

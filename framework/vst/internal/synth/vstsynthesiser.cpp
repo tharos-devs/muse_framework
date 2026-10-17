@@ -58,6 +58,9 @@ VstSynthesiser::~VstSynthesiser()
     instancesRegister()->unregisterInstrPlugin(m_params.resourceMeta.id, m_trackId);
 }
 
+//! NOTE: as the Mixer allows
+static constexpr int MAX_PLAYBACK_DELAY_MS = 500;
+
 void VstSynthesiser::init(const OutputSpec& spec)
 {
     IF_ASSERT_FAILED(spec.isValid()) {
@@ -134,7 +137,34 @@ void VstSynthesiser::initSequencer()
     }
     m_vstAudioClient->setParamsResetOnFlush(paramsResetOnFlush);
 
+    m_sequencer.setDelay(static_cast<mpe::timestamp_t>(m_params.delayMs) * 1000);
     m_sequencer.init(std::move(mappingsByChannel), m_useDynamicEvents, m_params.midiPort, m_params.midiChannel);
+}
+
+void VstSynthesiser::setPlaybackDelay(int delayMs)
+{
+    delayMs = std::clamp(delayMs, -MAX_PLAYBACK_DELAY_MS, MAX_PLAYBACK_DELAY_MS);
+    if (delayMs == m_params.delayMs) {
+        return;
+    }
+
+    m_params.delayMs = delayMs;
+
+    if (!m_inited) {
+        // Applied once the plugin is loaded
+        return;
+    }
+
+    // Notes still playing must end: their note-offs move with the others
+    flushSound();
+
+    m_sequencer.setDelay(static_cast<mpe::timestamp_t>(delayMs) * 1000);
+
+    // The articulation/CC state at the current position, as sent with the new delay
+    if (m_sequencer.isActive()) {
+        m_midiStateChasePending = true;
+        m_midiStateChaseAfterSeek = false;
+    }
 }
 
 void VstSynthesiser::setMidiRouting(int port, int channel)
