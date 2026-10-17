@@ -596,6 +596,10 @@ struct AudioSourceParams {
     int midiChannel = 0;
     std::vector<String> midiPortNames;
 
+    //! NOTE a track delay of an event-driven instrument (VST3), in ms: shifts everything it plays (notes,
+    //! articulation triggers, CCs), negative = earlier (e.g. a sample library with slow attacks)
+    int delayMs = 0;
+
     bool hasSameSource(const AudioSourceParams& other) const
     {
         return type() == other.type()
@@ -619,7 +623,8 @@ struct AudioSourceParams {
         return hasSameSource(other)
                && midiPort == other.midiPort
                && midiChannel == other.midiChannel
-               && midiPortNames == other.midiPortNames;
+               && midiPortNames == other.midiPortNames
+               && delayMs == other.delayMs;
     }
 
     bool operator !=(const AudioSourceParams& other) const { return !this->operator==(other); }

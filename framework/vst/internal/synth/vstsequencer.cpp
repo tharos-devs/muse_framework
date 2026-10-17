@@ -67,12 +67,108 @@ void VstSequencer::init(std::vector<ParamsMapping>&& mappingsByChannel, bool use
     updateMainStreamEvents(m_playbackData.originEvents, m_playbackData.dynamics);
 }
 
+void VstSequencer::setDelay(mpe::timestamp_t delay)
+{
+    if (m_delay == delay) {
+        return;
+    }
+
+    m_delay = delay;
+
+    if (m_inited) {
+        updateMainStreamEvents(m_playbackData.originEvents, m_playbackData.dynamics);
+    }
+}
+
+//! NOTE: shifts a span by an offset; what would start before the start of the score starts there instead, shortened
+//! by as much (its end stays where it was shifted to). False when it would end there or before
+static bool shiftSpan(mpe::timestamp_t& timestamp, mpe::duration_t& duration, const mpe::timestamp_t offset)
+{
+    timestamp += offset;
+    if (timestamp >= 0) {
+        return true;
+    }
+
+    const bool hasLength = duration > 0 && duration != mpe::INFINITE_DURATION;
+    if (hasLength) {
+        duration += timestamp;
+    }
+    timestamp = 0;
+
+    return !hasLength || duration > 0;
+}
+
+//! NOTE: a note shifted by an offset (track delay, an articulation's note delay), with its articulations (e.g. its
+//! pedal, its pitch bend): nullopt when it would end before the start of the score
+static std::optional<mpe::NoteEvent> shiftedNoteEvent(const mpe::NoteEvent& noteEvent, const mpe::timestamp_t offset)
+{
+    mpe::ArrangementContext arrangementCtx = noteEvent.arrangementCtx();
+    if (!shiftSpan(arrangementCtx.actualTimestamp, arrangementCtx.actualDuration, offset)) {
+        return std::nullopt;
+    }
+
+    mpe::ExpressionContext expressionCtx = noteEvent.expressionCtx();
+    for (auto& [type, articulation] : expressionCtx.articulations) {
+        mpe::ArticulationMeta& meta = articulation.meta;
+        if (!shiftSpan(meta.timestamp, meta.overallDuration, offset)) {
+            // over before the score's start: only its end is left, at the start
+            meta.overallDuration = 0;
+        }
+    }
+
+    return mpe::NoteEvent(std::move(arrangementCtx), mpe::PitchContext(noteEvent.pitchCtx()), std::move(expressionCtx));
+}
+
+//! NOTE: a copy of the events, all shifted by the delay (none before the start: they're sent there)
+static mpe::PlaybackEventsMap delayedEvents(const mpe::PlaybackEventsMap& events, const mpe::timestamp_t delay)
+{
+    mpe::PlaybackEventsMap result;
+    for (const auto& [timestamp, eventList] : events) {
+        mpe::PlaybackEventList& delayedList = result[std::max(timestamp + delay, mpe::timestamp_t(0))];
+        for (const mpe::PlaybackEvent& event : eventList) {
+            const auto* noteEvent = std::get_if<mpe::NoteEvent>(&event);
+            if (!noteEvent) {
+                delayedList.push_back(event);
+                continue;
+            }
+
+            if (std::optional<mpe::NoteEvent> delayedNote = shiftedNoteEvent(*noteEvent, delay)) {
+                delayedList.emplace_back(std::move(*delayedNote));
+            }
+        }
+    }
+
+    return result;
+}
+
+static mpe::DynamicAutomationLayers delayedDynamics(const mpe::DynamicAutomationLayers& dynamics, const mpe::timestamp_t delay)
+{
+    mpe::DynamicAutomationLayers result;
+    for (const auto& [layerIdx, curve] : dynamics) {
+        mpe::DynamicAutomationMap& delayedCurve = result[layerIdx];
+        for (const auto& [timestamp, point] : curve) {
+            delayedCurve[std::max(timestamp + delay, mpe::timestamp_t(0))] = point;
+        }
+    }
+
+    return result;
+}
+
 void VstSequencer::updateMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics)
 {
     if (!m_inited) {
         return;
     }
 
+    if (m_delay == 0) {
+        buildMainStreamEvents(events, dynamics);
+    } else {
+        buildMainStreamEvents(delayedEvents(events, m_delay), delayedDynamics(dynamics, m_delay));
+    }
+}
+
+void VstSequencer::buildMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics)
+{
     m_mainStreamEvents.clear();
     m_controllerStates.clear();
     m_liveOverrides.clear();
@@ -172,7 +268,8 @@ muse::audio::gain_t VstSequencer::currentGain() const
         }
 
         foundAnyLevel = true;
-        maxDynamicLevel = std::max(maxDynamicLevel, mpe::dynamicLevelFromNormalized(mpe::evaluateCurveAt(curve, m_playbackPosition)));
+        maxDynamicLevel
+            = std::max(maxDynamicLevel, mpe::dynamicLevelFromNormalized(mpe::evaluateCurveAt(curve, m_playbackPosition - m_delay)));
     }
 
     if (!foundAnyLevel) {
@@ -252,15 +349,15 @@ void VstSequencer::addDynamicEvents(EventSequenceMap& destination, const mpe::Dy
 void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& originNoteEvent, const mpe::timestamp_t notesOffset,
                                 const int channel, SostenutoTimeAndDurations& sostenutoTimeAndDurations)
 {
-    std::optional<mpe::NoteEvent> shiftedNoteEvent;
+    std::optional<mpe::NoteEvent> shiftedNote;
     if (notesOffset != 0) {
-        mpe::ArrangementContext shiftedCtx = originNoteEvent.arrangementCtx();
-        shiftedCtx.actualTimestamp = std::max(shiftedCtx.actualTimestamp + notesOffset, mpe::timestamp_t(0));
-        shiftedNoteEvent.emplace(std::move(shiftedCtx), mpe::PitchContext(originNoteEvent.pitchCtx()),
-                                 mpe::ExpressionContext(originNoteEvent.expressionCtx()));
+        shiftedNote = shiftedNoteEvent(originNoteEvent, notesOffset);
+        if (!shiftedNote) {
+            return;
+        }
     }
 
-    const mpe::NoteEvent& noteEvent = shiftedNoteEvent ? *shiftedNoteEvent : originNoteEvent;
+    const mpe::NoteEvent& noteEvent = shiftedNote ? *shiftedNote : originNoteEvent;
     const mpe::ArrangementContext& arrangementCtx = noteEvent.arrangementCtx();
     const int32_t noteId = noteIndex(noteEvent.pitchCtx().nominalPitchLevel);
     const float velocityFraction = noteVelocityFraction(noteEvent);

@@ -36,6 +36,10 @@ public:
     //! keyswitches go to channel (0-based), or to the channel of their articulation (MidiMessagesEvent::channel)
     void init(std::vector<ParamsMapping>&& mappingsByChannel, bool useDynamicEvents, int eventBus, int channel);
 
+    //! NOTE: the track delay: shifts every main stream event (notes, articulation triggers, CCs, dynamics),
+    //! negative = earlier; the live/off-stream events (e.g. a MIDI keyboard) are played as they come
+    void setDelay(mpe::timestamp_t delay);
+
     muse::audio::gain_t currentGain() const;
 
     //! NOTE: the raw MIDI state (keyswitch, CC, program change) last sent strictly before the given position,
@@ -51,6 +55,7 @@ public:
 
 private:
     void updateMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics) override;
+    void buildMainStreamEvents(const mpe::PlaybackEventsMap& events, const mpe::DynamicAutomationLayers& dynamics);
     void updateOffStreamEvents(const mpe::PlaybackEventsMap& events) override;
 
     struct SostenutoTimeAndDuration {
@@ -97,6 +102,7 @@ private:
 
     bool m_inited = false;
     bool m_useDynamicEvents = false;
+    mpe::timestamp_t m_delay = 0;
     std::vector<ParamsMapping> m_mappingsByChannel;
     int m_eventBus = 0;
     int m_channel = 0;
