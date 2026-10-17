@@ -36,9 +36,10 @@ QtObject {
     property int itemLeftPartWidth: 100
     property int itemRightPartWidth: 100
     property int minimumMenuWidth: 178
+    property int iconRowWidth: 0
 
     readonly property int itemWidth:
-        Math.max(itemLeftPartWidth + itemRightPartWidth, minimumMenuWidth)
+        Math.max(itemLeftPartWidth + itemRightPartWidth, minimumMenuWidth, iconRowWidth)
 
     property int iconAndCheckMarkMode: {
         if (hasItemsWithIconAndCheckable) {
@@ -54,6 +55,7 @@ QtObject {
         root.hasItemsWithIconOrCheckable = false
         root.hasItemsWithSubmenu = false
         root.hasItemsWithShortcut = false
+        root.iconRowWidth = 0
 
         //! NOTE Policy:
         //! - if the menu contains checkable items, space for the checkmarks is reserved
@@ -64,6 +66,13 @@ QtObject {
 
         for (let i = 0; i < model.length; i++) {
             let item = Boolean(model.get) ? model.get(i).item : model[i]
+
+            //! NOTE: its buttons don't take part in the policy above, only its width counts
+            if (item.iconRow) {
+                root.iconRowWidth = Math.max(root.iconRowWidth, testIconRow.calculatedWidth(item))
+                continue
+            }
+
             let hasIcon = (Boolean(item.icon) && item.icon !== IconCode.NONE)
 
             if (item.checkable && hasIcon) {
@@ -89,7 +98,12 @@ QtObject {
         let rightWidth = 0
 
         for (let j = 0; j < model.length; j++) {
-            testItem.modelData = Boolean(model.get) ? model.get(j).item : model[j]
+            let item = Boolean(model.get) ? model.get(j).item : model[j]
+            if (item.iconRow) {
+                continue
+            }
+
+            testItem.modelData = item
             leftWidth = Math.max(leftWidth, testItem.calculatedLeftPartWidth())
             rightWidth = Math.max(rightWidth, testItem.calculatedRightPartWidth())
         }
@@ -105,4 +119,6 @@ QtObject {
         reserveSpaceForShortcutsOrSubmenuIndicator:
             root.hasItemsWithShortcut || root.hasItemsWithSubmenu
     }
+
+    property MenuIconRowItem testIconRow: MenuIconRowItem {}
 }

@@ -189,6 +189,7 @@ qt_add_qml_module(muse_uicomponents_qml
         internal/DirectoriesView.qml
         internal/GridViewDelegate.qml
         internal/GridViewSection.qml
+        internal/MenuIconRowItem.qml
         internal/MenuMetrics.qml
         internal/PopupContent.qml
         internal/StyledDropdownLoader.qml
