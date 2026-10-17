@@ -46,11 +46,14 @@ FocusScope {
     property real textWidth: -1
 
     property bool checked: false
+    //! NOTE: no background until hovered, pressed or checked, like a transparent FlatButton (e.g. in a toolbar)
+    property bool transparent: false
 
     property var menuItems: []
 
     property string toolTipTitle: ""
     property string toolTipDescription: ""
+    property string toolTipShortcut: ""
 
     readonly property bool isMenuOpened: menuLoader.isMenuOpened
 
@@ -83,14 +86,15 @@ FocusScope {
     readonly property bool isHovered: mainMouseArea.containsMouse || arrowMouseArea.containsMouse
     readonly property bool isPressed: mainMouseArea.pressed || arrowMouseArea.pressed
 
-    readonly property color normalColor: root.checked ? ui.theme.accentColor : ui.theme.buttonColor
+    readonly property color hoverHitColor: root.checked ? ui.theme.accentColor : ui.theme.buttonColor
+    readonly property color normalColor: root.transparent && !root.checked ? "transparent" : root.hoverHitColor
 
-    readonly property int arrowAreaWidth: 20
+    property int arrowAreaWidth: 20
 
     implicitWidth: mainContent.implicitWidth + 2 * mainContentMargins + root.arrowAreaWidth
     implicitHeight: ui.theme.defaultButtonSize
 
-    readonly property real mainContentMargins: 12
+    property real mainContentMargins: 12
 
     objectName: root.text !== "" ? root.text : root.toolTipTitle
 
@@ -133,6 +137,7 @@ FocusScope {
 
                 PropertyChanges {
                     target: background
+                    color: root.hoverHitColor
                     opacity: ui.theme.buttonOpacityHit
                 }
             },
@@ -143,6 +148,7 @@ FocusScope {
 
                 PropertyChanges {
                     target: background
+                    color: root.hoverHitColor
                     opacity: ui.theme.buttonOpacityHover
                 }
             }
@@ -220,7 +226,7 @@ FocusScope {
                     }
 
                     if (mainMouseArea.containsMouse) {
-                        ui.tooltip.show(root, root.toolTipTitle, root.toolTipDescription, "")
+                        ui.tooltip.show(root, root.toolTipTitle, root.toolTipDescription, root.toolTipShortcut)
                     } else {
                         ui.tooltip.hide(root)
                     }
