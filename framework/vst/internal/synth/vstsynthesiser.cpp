@@ -137,6 +137,8 @@ void VstSynthesiser::initSequencer()
     }
     m_vstAudioClient->setParamsResetOnFlush(paramsResetOnFlush);
 
+    //! NOTE: e.g. a project saved with a delay out of today's limits
+    m_params.delayMs = std::clamp(m_params.delayMs, -MAX_PLAYBACK_DELAY_MS, MAX_PLAYBACK_DELAY_MS);
     m_sequencer.setDelay(static_cast<mpe::timestamp_t>(m_params.delayMs) * 1000);
     m_sequencer.init(std::move(mappingsByChannel), m_useDynamicEvents, m_params.midiPort, m_params.midiChannel);
 }

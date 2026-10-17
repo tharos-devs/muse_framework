@@ -80,6 +80,45 @@ void VstSequencer::setDelay(mpe::timestamp_t delay)
     }
 }
 
+//! NOTE: shifts a span by an offset; what would start before the start of the score starts there instead, shortened
+//! by as much (its end stays where it was shifted to). False when it would end there or before
+static bool shiftSpan(mpe::timestamp_t& timestamp, mpe::duration_t& duration, const mpe::timestamp_t offset)
+{
+    timestamp += offset;
+    if (timestamp >= 0) {
+        return true;
+    }
+
+    const bool hasLength = duration > 0 && duration != mpe::INFINITE_DURATION;
+    if (hasLength) {
+        duration += timestamp;
+    }
+    timestamp = 0;
+
+    return !hasLength || duration > 0;
+}
+
+//! NOTE: a note shifted by an offset (track delay, an articulation's note delay), with its articulations (e.g. its
+//! pedal, its pitch bend): nullopt when it would end before the start of the score
+static std::optional<mpe::NoteEvent> shiftedNoteEvent(const mpe::NoteEvent& noteEvent, const mpe::timestamp_t offset)
+{
+    mpe::ArrangementContext arrangementCtx = noteEvent.arrangementCtx();
+    if (!shiftSpan(arrangementCtx.actualTimestamp, arrangementCtx.actualDuration, offset)) {
+        return std::nullopt;
+    }
+
+    mpe::ExpressionContext expressionCtx = noteEvent.expressionCtx();
+    for (auto& [type, articulation] : expressionCtx.articulations) {
+        mpe::ArticulationMeta& meta = articulation.meta;
+        if (!shiftSpan(meta.timestamp, meta.overallDuration, offset)) {
+            // over before the score's start: only its end is left, at the start
+            meta.overallDuration = 0;
+        }
+    }
+
+    return mpe::NoteEvent(std::move(arrangementCtx), mpe::PitchContext(noteEvent.pitchCtx()), std::move(expressionCtx));
+}
+
 //! NOTE: a copy of the events, all shifted by the delay (none before the start: they're sent there)
 static mpe::PlaybackEventsMap delayedEvents(const mpe::PlaybackEventsMap& events, const mpe::timestamp_t delay)
 {
@@ -93,10 +132,9 @@ static mpe::PlaybackEventsMap delayedEvents(const mpe::PlaybackEventsMap& events
                 continue;
             }
 
-            mpe::ArrangementContext arrangementCtx = noteEvent->arrangementCtx();
-            arrangementCtx.actualTimestamp = std::max(arrangementCtx.actualTimestamp + delay, mpe::timestamp_t(0));
-            delayedList.emplace_back(mpe::NoteEvent(std::move(arrangementCtx), mpe::PitchContext(noteEvent->pitchCtx()),
-                                                    mpe::ExpressionContext(noteEvent->expressionCtx())));
+            if (std::optional<mpe::NoteEvent> delayedNote = shiftedNoteEvent(*noteEvent, delay)) {
+                delayedList.emplace_back(std::move(*delayedNote));
+            }
         }
     }
 
@@ -311,15 +349,15 @@ void VstSequencer::addDynamicEvents(EventSequenceMap& destination, const mpe::Dy
 void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& originNoteEvent, const mpe::timestamp_t notesOffset,
                                 const int channel, SostenutoTimeAndDurations& sostenutoTimeAndDurations)
 {
-    std::optional<mpe::NoteEvent> shiftedNoteEvent;
+    std::optional<mpe::NoteEvent> shiftedNote;
     if (notesOffset != 0) {
-        mpe::ArrangementContext shiftedCtx = originNoteEvent.arrangementCtx();
-        shiftedCtx.actualTimestamp = std::max(shiftedCtx.actualTimestamp + notesOffset, mpe::timestamp_t(0));
-        shiftedNoteEvent.emplace(std::move(shiftedCtx), mpe::PitchContext(originNoteEvent.pitchCtx()),
-                                 mpe::ExpressionContext(originNoteEvent.expressionCtx()));
+        shiftedNote = shiftedNoteEvent(originNoteEvent, notesOffset);
+        if (!shiftedNote) {
+            return;
+        }
     }
 
-    const mpe::NoteEvent& noteEvent = shiftedNoteEvent ? *shiftedNoteEvent : originNoteEvent;
+    const mpe::NoteEvent& noteEvent = shiftedNote ? *shiftedNote : originNoteEvent;
     const mpe::ArrangementContext& arrangementCtx = noteEvent.arrangementCtx();
     const int32_t noteId = noteIndex(noteEvent.pitchCtx().nominalPitchLevel);
     const float velocityFraction = noteVelocityFraction(noteEvent);
