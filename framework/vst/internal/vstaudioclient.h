@@ -85,6 +85,7 @@ private:
 
     void ensureActivity();
     void disableActivity();
+    void warmUpFx(muse::audio::samples_t samplesPerChannel);
 
     void flushBuffers();
 
@@ -92,6 +93,7 @@ private:
     void commitVolumeGainChanges();
 
     bool m_isActive = false;
+    bool m_fxWarmUpPending = false;
     muse::audio::gain_t m_volumeGain = 1.f; // 0.0 - 1.0
     std::vector<std::pair<muse::audio::samples_t, muse::audio::gain_t> > m_volumeGainChanges; // in the next process() call
 

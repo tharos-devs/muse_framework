@@ -295,6 +295,11 @@ audio::samples_t VstAudioClient::process(float* output, samples_t samplesPerChan
     }
 
     if (m_type == PluginType::Fx) {
+        if (m_fxWarmUpPending) {
+            m_fxWarmUpPending = false;
+            warmUpFx(samplesPerChannel);
+        }
+
         extractInputSamples(samplesPerChannel, output);
     }
 
@@ -659,6 +664,27 @@ void VstAudioClient::ensureActivity()
     processor->setProcessing(true);
 
     m_isActive = true;
+    m_fxWarmUpPending = m_type == PluginType::Fx;
+}
+
+//! NOTE Once (re)activated (e.g. the export's block size, which differs from the driver's), some effects
+//! (e.g. IK Multimedia's TR5 White 2A) output silence on their first block: the music's first block
+//! (85 ms in an export) was lost, its attacks cut. Like in a DAW, where an effect keeps running when stopped,
+//! a few blocks of silence go through it first
+void VstAudioClient::warmUpFx(samples_t samplesPerChannel)
+{
+    static constexpr int WARM_UP_BLOCK_COUNT = 2;
+
+    IAudioProcessorPtr processor = pluginProcessor();
+    if (!processor) {
+        return;
+    }
+
+    const std::vector<float> silence(samplesPerChannel * m_outputSpec.audioChannelCount, 0.f);
+    for (int i = 0; i < WARM_UP_BLOCK_COUNT; ++i) {
+        extractInputSamples(samplesPerChannel, silence.data());
+        processor->process(m_processData);
+    }
 }
 
 void VstAudioClient::disableActivity()
