@@ -59,9 +59,14 @@ static std::optional<TransportEvent> mmcToTransportEvent(const IMMCDecoderPtr& d
     return std::nullopt;
 }
 
+//! NOTE: the events of a whole block are sent in a single process() call (see VstSynthesiser::process()):
+//! room for big chords, keyswitches and the articulation state re-sent on a seek (the SDK's default is 50)
+static constexpr Steinberg::int32 MAX_INPUT_EVENTS_PER_BLOCK = 1024;
+
 VstAudioClient::VstAudioClient()
 {
     m_processContext.state = 0;
+    m_inputEvents.setMaxSize(MAX_INPUT_EVENTS_PER_BLOCK);
 }
 
 VstAudioClient::~VstAudioClient()
@@ -169,6 +174,21 @@ void VstAudioClient::setProcessMode(VstProcessMode mode)
 void VstAudioClient::setVolumeGain(const muse::audio::gain_t newVolumeGain)
 {
     m_volumeGain = newVolumeGain;
+    m_volumeGainChanges.clear();
+}
+
+void VstAudioClient::addVolumeGainChange(const samples_t sampleOffset, const muse::audio::gain_t newVolumeGain)
+{
+    m_volumeGainChanges.emplace_back(sampleOffset, newVolumeGain);
+}
+
+//! NOTE: the block is over: its last gain change is the gain from now on
+void VstAudioClient::commitVolumeGainChanges()
+{
+    if (!m_volumeGainChanges.empty()) {
+        m_volumeGain = m_volumeGainChanges.back().second;
+        m_volumeGainChanges.clear();
+    }
 }
 
 bool VstAudioClient::handleEvent(const VstEvent& event)
@@ -190,10 +210,10 @@ bool VstAudioClient::handleEvent(const VstEvent& event)
     return false;
 }
 
-bool VstAudioClient::handleParamChange(const ParamChangeEvent& param)
+bool VstAudioClient::handleParamChange(const ParamChangeEvent& param, Steinberg::int32 sampleOffset)
 {
     ensureActivity();
-    addParamChange(param);
+    addParamChange(param, sampleOffset);
 
     m_playingParams.insert(param.paramId);
 
@@ -254,11 +274,8 @@ audio::samples_t VstAudioClient::process(float* output, samples_t samplesPerChan
                                          samples_t playbackPositionSamples)
 {
     IAudioProcessorPtr processor = pluginProcessor();
-    if (!processor || !output) {
-        return 0;
-    }
-
-    if (!m_isActive) {
+    if (!processor || !output || !m_isActive) {
+        commitVolumeGainChanges();
         return 0;
     }
 
@@ -282,6 +299,7 @@ audio::samples_t VstAudioClient::process(float* output, samples_t samplesPerChan
     }
 
     if (processor->process(m_processData) != Steinberg::kResultOk) {
+        commitVolumeGainChanges();
         return 0;
     }
 
@@ -296,6 +314,7 @@ audio::samples_t VstAudioClient::process(float* output, samples_t samplesPerChan
         fillOutputBufferFx(samplesPerChannel, output);
     }
 
+    commitVolumeGainChanges();
     processOutputEvents();
 
     return samplesPerChannel;
@@ -537,12 +556,21 @@ void VstAudioClient::fillOutputBufferInstrument(samples_t sampleCount, float* ou
     for (const int busIndex : m_activeOutputBusses) {
         Steinberg::Vst::AudioBusBuffers bus = m_processData.outputs[busIndex];
 
+        // Each gain change of the block from its sample on
+        muse::audio::gain_t gain = m_volumeGain;
+        size_t nextChange = 0;
+
         for (samples_t sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+            while (nextChange < m_volumeGainChanges.size() && m_volumeGainChanges[nextChange].first <= sampleIndex) {
+                gain = m_volumeGainChanges[nextChange].second;
+                ++nextChange;
+            }
+
             size_t offset = sampleIndex * m_outputSpec.audioChannelCount;
 
             for (audioch_t audioChannelIndex = 0; audioChannelIndex < bus.numChannels; ++audioChannelIndex) {
                 float sample = bus.channelBuffers32[audioChannelIndex][sampleIndex];
-                output[offset + audioChannelIndex] += sample * m_volumeGain;
+                output[offset + audioChannelIndex] += sample * gain;
             }
         }
     }
@@ -683,11 +711,11 @@ void VstAudioClient::flushBuffers()
     }
 }
 
-void VstAudioClient::addParamChange(const ParamChangeEvent& param)
+void VstAudioClient::addParamChange(const ParamChangeEvent& param, Steinberg::int32 sampleOffset)
 {
     Steinberg::int32 dummyIdx = 0;
     Steinberg::Vst::IParamValueQueue* queue = m_inputParamChanges.addParameterData(param.paramId, dummyIdx);
     if (queue) {
-        queue->addPoint(0, param.value, dummyIdx);
+        queue->addPoint(sampleOffset, param.value, dummyIdx);
     }
 }
