@@ -73,7 +73,7 @@ private:
     void updateDeactivationCountdown(const VstSequencer::EventSequenceMap& sequences, const muse::audio::samples_t samplesPerChannel);
 
     void toggleVolumeGain(const bool isActive);
-    audio::samples_t processSequence(const VstSequencer::EventSequence& sequence, const audio::samples_t samples, float* buffer);
+    void handleSequenceEvents(const VstSequencer::EventSequence& sequence, const audio::samples_t sampleOffset);
     void applyMidiStateChase(VstSequencer::EventSequenceMap& sequences);
 
     IVstPluginInstancePtr m_pluginPtr = nullptr;

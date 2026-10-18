@@ -354,28 +354,23 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
         }
     }
 
-    samples_t sampleOffset = 0;
-    samples_t processedSamples = 0;
-
+    // All the block's events go to a single process() call, each at its sample offset, as DAW hosts do: processing
+    // the block in slices cut at every event (some only a few samples long) made plugins such as SINE Player drop
+    // notes now and then
+    samples_t eventOffset = 0;
     for (auto it = sequences.cbegin(); it != sequences.cend(); ++it) {
-        samples_t durationInSamples = samplesPerChannel - sampleOffset;
+        handleSequenceEvents(it->second, std::min(eventOffset, samplesPerChannel > 0 ? samplesPerChannel - 1 : 0));
 
         auto nextIt = std::next(it);
         if (nextIt != sequences.cend()) {
-            msecs_t duration = nextIt->first - it->first;
-            durationInSamples = microSecsToSamples(duration, m_outputSpec.sampleRate);
+            eventOffset += microSecsToSamples(nextIt->first - it->first, m_outputSpec.sampleRate);
         }
+    }
 
-        IF_ASSERT_FAILED(sampleOffset + durationInSamples <= samplesPerChannel) {
-            break;
-        }
+    const samples_t processedSamples = m_vstAudioClient->process(buffer, samplesPerChannel, m_currentPosition.samples());
 
-        processedSamples += processSequence(it->second, durationInSamples, buffer + sampleOffset * m_outputSpec.audioChannelCount);
-        sampleOffset += durationInSamples;
-
-        if (active) {
-            m_currentPosition.forward(durationInSamples);
-        }
+    if (active) {
+        m_currentPosition.forward(samplesPerChannel);
     }
 
     return processedSamples;
@@ -442,22 +437,21 @@ void VstSynthesiser::applyMidiStateChase(VstSequencer::EventSequenceMap& sequenc
     firstSequence.insert(firstSequence.begin(), staleOffEvents.cbegin(), staleOffEvents.cend());
 }
 
-samples_t VstSynthesiser::processSequence(const VstSequencer::EventSequence& sequence, const samples_t samples, float* buffer)
+void VstSynthesiser::handleSequenceEvents(const VstSequencer::EventSequence& sequence, const samples_t sampleOffset)
 {
+    const Steinberg::int32 offset = static_cast<Steinberg::int32>(sampleOffset);
+
     for (const VstSequencer::EventType& event : sequence) {
         if (std::holds_alternative<VstEvent>(event)) {
-            m_vstAudioClient->handleEvent(std::get<VstEvent>(event));
+            VstEvent vstEvent = std::get<VstEvent>(event);
+            vstEvent.sampleOffset = offset;
+            m_vstAudioClient->handleEvent(vstEvent);
         } else if (std::holds_alternative<ParamChangeEvent>(event)) {
-            m_vstAudioClient->handleParamChange(std::get<ParamChangeEvent>(event));
+            m_vstAudioClient->handleParamChange(std::get<ParamChangeEvent>(event), offset);
         } else {
+            //! NOTE: the gain applies to the whole block (the expression level is resampled every 30 ms anyway)
             muse::audio::gain_t newGain = std::get<muse::audio::gain_t>(event);
             m_vstAudioClient->setVolumeGain(newGain);
         }
     }
-
-    if (samples == 0) {
-        return 0;
-    }
-
-    return m_vstAudioClient->process(buffer, samples, m_currentPosition.samples());
 }

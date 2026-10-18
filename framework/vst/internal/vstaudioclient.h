@@ -50,7 +50,8 @@ public:
     void setVolumeGain(const muse::audio::gain_t newVolumeGain);
 
     bool handleEvent(const VstEvent& event);
-    bool handleParamChange(const ParamChangeEvent& param);
+    //! NOTE: sampleOffset: where in the next process() call the change happens
+    bool handleParamChange(const ParamChangeEvent& param, Steinberg::int32 sampleOffset = 0);
 
     void flushSound();
 
@@ -83,7 +84,7 @@ private:
 
     void flushBuffers();
 
-    void addParamChange(const ParamChangeEvent& param);
+    void addParamChange(const ParamChangeEvent& param, Steinberg::int32 sampleOffset = 0);
 
     bool m_isActive = false;
     muse::audio::gain_t m_volumeGain = 1.f; // 0.0 - 1.0

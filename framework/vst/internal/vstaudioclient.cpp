@@ -59,9 +59,14 @@ static std::optional<TransportEvent> mmcToTransportEvent(const IMMCDecoderPtr& d
     return std::nullopt;
 }
 
+//! NOTE: the events of a whole block are sent in a single process() call (see VstSynthesiser::process()):
+//! room for big chords, keyswitches and the articulation state re-sent on a seek (the SDK's default is 50)
+static constexpr Steinberg::int32 MAX_INPUT_EVENTS_PER_BLOCK = 1024;
+
 VstAudioClient::VstAudioClient()
 {
     m_processContext.state = 0;
+    m_inputEvents.setMaxSize(MAX_INPUT_EVENTS_PER_BLOCK);
 }
 
 VstAudioClient::~VstAudioClient()
@@ -190,10 +195,10 @@ bool VstAudioClient::handleEvent(const VstEvent& event)
     return false;
 }
 
-bool VstAudioClient::handleParamChange(const ParamChangeEvent& param)
+bool VstAudioClient::handleParamChange(const ParamChangeEvent& param, Steinberg::int32 sampleOffset)
 {
     ensureActivity();
-    addParamChange(param);
+    addParamChange(param, sampleOffset);
 
     m_playingParams.insert(param.paramId);
 
@@ -683,11 +688,11 @@ void VstAudioClient::flushBuffers()
     }
 }
 
-void VstAudioClient::addParamChange(const ParamChangeEvent& param)
+void VstAudioClient::addParamChange(const ParamChangeEvent& param, Steinberg::int32 sampleOffset)
 {
     Steinberg::int32 dummyIdx = 0;
     Steinberg::Vst::IParamValueQueue* queue = m_inputParamChanges.addParameterData(param.paramId, dummyIdx);
     if (queue) {
-        queue->addPoint(0, param.value, dummyIdx);
+        queue->addPoint(sampleOffset, param.value, dummyIdx);
     }
 }
