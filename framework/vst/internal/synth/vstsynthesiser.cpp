@@ -334,7 +334,8 @@ void VstSynthesiser::setOutputSpec(const audio::OutputSpec& spec)
 
 samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
 {
-    if (!buffer) {
+    // No empty process() call to the plugin: some don't expect it
+    if (!buffer || samplesPerChannel == 0) {
         return 0;
     }
 
@@ -359,7 +360,7 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
     // notes now and then
     samples_t eventOffset = 0;
     for (auto it = sequences.cbegin(); it != sequences.cend(); ++it) {
-        handleSequenceEvents(it->second, std::min(eventOffset, samplesPerChannel > 0 ? samplesPerChannel - 1 : 0));
+        handleSequenceEvents(it->second, std::min(eventOffset, samplesPerChannel - 1));
 
         auto nextIt = std::next(it);
         if (nextIt != sequences.cend()) {
@@ -449,9 +450,7 @@ void VstSynthesiser::handleSequenceEvents(const VstSequencer::EventSequence& seq
         } else if (std::holds_alternative<ParamChangeEvent>(event)) {
             m_vstAudioClient->handleParamChange(std::get<ParamChangeEvent>(event), offset);
         } else {
-            //! NOTE: the gain applies to the whole block (the expression level is resampled every 30 ms anyway)
-            muse::audio::gain_t newGain = std::get<muse::audio::gain_t>(event);
-            m_vstAudioClient->setVolumeGain(newGain);
+            m_vstAudioClient->addVolumeGainChange(sampleOffset, std::get<muse::audio::gain_t>(event));
         }
     }
 }

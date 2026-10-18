@@ -22,6 +22,8 @@
 #pragma once
 
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "../ivstplugininstance.h"
 #include "../vsttypes.h"
@@ -48,6 +50,8 @@ public:
     void setOutputSpec(const audio::OutputSpec& spec);
     void setProcessMode(VstProcessMode mode);
     void setVolumeGain(const muse::audio::gain_t newVolumeGain);
+    //! NOTE: a gain change at a sample of the next process() call (it applies from there on)
+    void addVolumeGainChange(muse::audio::samples_t sampleOffset, muse::audio::gain_t newVolumeGain);
 
     bool handleEvent(const VstEvent& event);
     //! NOTE: sampleOffset: where in the next process() call the change happens
@@ -85,9 +89,11 @@ private:
     void flushBuffers();
 
     void addParamChange(const ParamChangeEvent& param, Steinberg::int32 sampleOffset = 0);
+    void commitVolumeGainChanges();
 
     bool m_isActive = false;
     muse::audio::gain_t m_volumeGain = 1.f; // 0.0 - 1.0
+    std::vector<std::pair<muse::audio::samples_t, muse::audio::gain_t> > m_volumeGainChanges; // in the next process() call
 
     IVstPluginInstancePtr m_pluginPtr = nullptr;
     mutable PluginComponentPtr m_pluginComponent = nullptr;
