@@ -85,14 +85,23 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
 
         // There are no empty slots, let's try
         // found a slot that has no ports (all ports are unregistered)
+        bool busySlot = false;
         for (size_t i = 0; i < m_threads.size(); ++i) {
             ThreadData* thdata = m_threads.at(i);
             if (!thdata) {
                 continue;
             }
 
-            std::scoped_lock innerLock(thdata->mutex);
-            if (!thdata->ports.empty()) {
+            // a slot being processed is in use, and waiting for it could deadlock (see ThreadData::pendingPorts):
+            // skipped, the caller tries again a bit later
+            std::unique_lock innerLock(thdata->mutex, std::try_to_lock);
+            if (!innerLock.owns_lock()) {
+                busySlot = true;
+                continue;
+            }
+
+            std::scoped_lock pendingLock(thdata->pendingMutex);
+            if (!thdata->ports.empty() || !thdata->pendingPorts.empty()) {
                 continue;
             }
 
@@ -102,7 +111,7 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
         }
 
         // No free slots found, the thread pool is exhausted
-        assert(false && "thread pool exhausted");
+        assert(busySlot && "thread pool exhausted");
     }
 
     return nullptr;
@@ -137,8 +146,9 @@ void QueuePool::regPort(const std::thread::id& th, const std::shared_ptr<Port>& 
         return;
     }
 
-    std::scoped_lock lock(thdata->mutex);
-    thdata->ports.push_back(port);
+    std::scoped_lock lock(thdata->pendingMutex);
+    thdata->pendingPorts.push_back(port);
+    thdata->hasPendingPorts = true;
 }
 
 void QueuePool::unregPort(const std::thread::id& th, const std::shared_ptr<Port>& port)
@@ -157,6 +167,22 @@ void QueuePool::unregPort(const std::thread::id& th, const std::shared_ptr<Port>
     std::scoped_lock lock(thdata->mutex);
     auto& ports = thdata->ports;
     ports.erase(std::remove(ports.begin(), ports.end(), port), ports.end());
+
+    std::scoped_lock pendingLock(thdata->pendingMutex);
+    auto& pendingPorts = thdata->pendingPorts;
+    pendingPorts.erase(std::remove(pendingPorts.begin(), pendingPorts.end(), port), pendingPorts.end());
+}
+
+void QueuePool::addPendingPorts(ThreadData* thdata)
+{
+    if (!thdata->hasPendingPorts) {
+        return;
+    }
+
+    std::scoped_lock lock(thdata->pendingMutex);
+    thdata->ports.insert(thdata->ports.end(), thdata->pendingPorts.begin(), thdata->pendingPorts.end());
+    thdata->pendingPorts.clear();
+    thdata->hasPendingPorts = false;
 }
 
 void QueuePool::processMessages()
@@ -181,9 +207,15 @@ void QueuePool::processMessages(const std::thread::id& th)
         return;
     }
 
+    addPendingPorts(thdata);
+
     for (size_t i = 0; i < thdata->ports.size(); ++i) {
-        std::shared_ptr<Port>& port = thdata->ports.at(i);
+        // a copy: a callback may register ports, which can reallocate `ports`
+        const std::shared_ptr<Port> port = thdata->ports.at(i);
         port->process();
+
+        // ports registered meanwhile (e.g. by this thread's callbacks) are processed in this pass too
+        addPendingPorts(thdata);
     }
 }
 } // kors::async
