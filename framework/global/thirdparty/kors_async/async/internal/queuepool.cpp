@@ -85,15 +85,18 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
 
         // There are no empty slots, let's try
         // found a slot that has no ports (all ports are unregistered)
+        bool busySlot = false;
         for (size_t i = 0; i < m_threads.size(); ++i) {
             ThreadData* thdata = m_threads.at(i);
             if (!thdata) {
                 continue;
             }
 
-            // a slot being processed is in use, and waiting for it could deadlock (see ThreadData::pendingPorts)
+            // a slot being processed is in use, and waiting for it could deadlock (see ThreadData::pendingPorts):
+            // skipped, the caller tries again a bit later
             std::unique_lock innerLock(thdata->mutex, std::try_to_lock);
             if (!innerLock.owns_lock()) {
+                busySlot = true;
                 continue;
             }
 
@@ -108,7 +111,7 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
         }
 
         // No free slots found, the thread pool is exhausted
-        assert(false && "thread pool exhausted");
+        assert(busySlot && "thread pool exhausted");
     }
 
     return nullptr;
