@@ -21,7 +21,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+#include <atomic>
 #include <thread>
+#include <vector>
 #include <chrono>
 
 #include <gtest/gtest.h>
@@ -308,6 +310,59 @@ TEST(Channel_Tests, MultiThread_ReceiveFromThread)
     t1.join();
 
     EXPECT_EQ(receivedVal, 42);
+}
+
+TEST(Channel_Tests, MultiThread_NewSenderThread_WhileReceiverWaitsForIt)
+{
+    //! NOTE A callback waits for another thread (e.g. the audio engine waiting for the end of the audio
+    //! processing) that sends to this thread for the first time (e.g. from a new audio callback thread):
+    //! that sender must not wait for the callback to end, or both would wait for each other forever
+    Channel<int> ch;
+
+    std::atomic<bool> secondSent = false;
+    bool secondSentDuringCallback = false;
+    std::vector<int> receivedVals;
+    std::thread t2;
+
+    ch.onReceive(nullptr, [&](const int& val) {
+        // main thread
+        receivedVals.push_back(val);
+        if (val != 1) {
+            return;
+        }
+
+        t2 = std::thread([](Channel<int> ch, std::atomic<bool>* sent) {
+            ch.send(2);
+            *sent = true;
+        }, ch, &secondSent);
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!secondSent && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        secondSentDuringCallback = secondSent;
+    });
+
+    auto t1 = std::thread([](Channel<int> ch) {
+        ch.send(1);
+    }, ch);
+
+    // emulate an event loop in the main thread
+    const std::thread::id thisThId = std::this_thread::get_id();
+    int iteration = 0;
+    while (iteration < 100) {
+        ++iteration;
+        async::processMessages(thisThId);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    t1.join();
+    if (t2.joinable()) {
+        t2.join();
+    }
+
+    EXPECT_TRUE(secondSentDuringCallback);
+    EXPECT_EQ(receivedVals, std::vector<int>({ 1, 2 }));
 }
 
 TEST(Channel_Tests, MultiThread_ReceiveFromThread_ResetOnReceive)

@@ -23,6 +23,7 @@ SOFTWARE.
 */
 #pragma once
 
+#include <atomic>
 #include <thread>
 #include <vector>
 #include <memory>
@@ -68,8 +69,17 @@ private:
     struct ThreadData {
         std::thread::id threadId;
         std::vector<std::shared_ptr<Port> > ports;
-        std::recursive_mutex mutex;
+        std::recursive_mutex mutex; // held while the thread processes its ports (i.e. runs callbacks)
+
+        //! NOTE Ports registered by other threads wait here until the thread's next processMessages():
+        //! regPort() must never wait on `mutex`, or a sender waited on by a callback being processed
+        //! (e.g. the audio engine waiting for the end of the audio processing) would deadlock with it
+        std::vector<std::shared_ptr<Port> > pendingPorts;
+        std::mutex pendingMutex;
+        std::atomic<bool> hasPendingPorts { false };
     };
+
+    void addPendingPorts(ThreadData* thdata);
 
     ThreadData* threadData(const std::thread::id& threadId, bool create);
 
