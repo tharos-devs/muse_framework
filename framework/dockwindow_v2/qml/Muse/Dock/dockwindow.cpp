@@ -43,6 +43,7 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQuickWindow>
+#include <QScreen>
 
 #include "dockcentralview.h"
 #include "dockpageview.h"
@@ -226,6 +227,9 @@ void DockWindow::componentComplete()
 
     m_topLevelToolBarsLayout = new TopLevelToolBarsLayout(m_mainWindow, this);
 
+    //! NOTE The layout's size constraints changed (panels shown/hidden/moved, toolbars resized...)
+    connect(m_mainWindow, &KDDockWidgets::QtQuick::View::geometryUpdated, this, &DockWindow::updateWindowMinimumSize);
+
     connect(qApp, &QCoreApplication::aboutToQuit, this, &DockWindow::onQuit);
     connect(this, &QQuickItem::windowChanged, this, &DockWindow::windowPropertyChanged);
 }
@@ -306,6 +310,39 @@ void DockWindow::updatePolish()
 
     if (m_topLevelToolBarsLayout) {
         m_topLevelToolBarsLayout->relayout();
+    }
+
+    updateWindowMinimumSize();
+}
+
+void DockWindow::updateWindowMinimumSize()
+{
+    QQuickWindow* win = window();
+    if (!win || !m_mainWindow || !m_mainWindow->mainWindow() || KDDockWidgets::LayoutSaver::restoreInProgress()) {
+        return;
+    }
+
+    if (m_minimumSizeWindow != win) {
+        m_minimumSizeWindow = win;
+        m_baseWindowMinimumSize = win->minimumSize();
+    }
+
+    KDDockWidgets::Core::Layout* layout = m_mainWindow->mainWindow()->layout();
+    if (!layout) {
+        return;
+    }
+
+    //! NOTE Whatever surrounds this item in the window (normally nothing) counts too
+    const QSize chrome = (win->size() - size().toSize()).expandedTo(QSize(0, 0));
+    QSize minimum = m_baseWindowMinimumSize.expandedTo(layout->layoutMinimumSize() + chrome);
+
+    //! NOTE A layout wider than the screen can't fit anyway: the window stays on it
+    if (const QScreen* screen = win->screen()) {
+        minimum = minimum.boundedTo(screen->availableGeometry().size());
+    }
+
+    if (win->minimumSize() != minimum) {
+        win->setMinimumSize(minimum);
     }
 }
 
