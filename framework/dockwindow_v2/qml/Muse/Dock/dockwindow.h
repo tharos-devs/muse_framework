@@ -140,6 +140,8 @@ private slots:
     //! in a QML window (it only does it for a main window that's the root view), and lets the layout run past
     //! the window's right/bottom edges instead (e.g. the bottom panels' right part cut off)
     void updateWindowMinimumSize();
+    //! NOTE Same for the secondary window
+    void updateSecondaryWindowMinimumSize();
 
 private:
     DockPageView* pageByUri(const QString& uri) const;
@@ -203,6 +205,7 @@ private:
     //! NOTE The window's own minimum size (from its QML), the floor of updateWindowMinimumSize()
     QPointer<QQuickWindow> m_minimumSizeWindow;
     QSize m_baseWindowMinimumSize;
+    QSize m_baseSecondaryWindowMinimumSize;
     TopLevelToolBarsLayout* m_topLevelToolBarsLayout = nullptr;
 
     bool m_hasGeometryBeenRestored = false;

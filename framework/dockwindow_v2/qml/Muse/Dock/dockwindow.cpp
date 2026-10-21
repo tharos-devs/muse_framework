@@ -315,26 +315,22 @@ void DockWindow::updatePolish()
     updateWindowMinimumSize();
 }
 
-void DockWindow::updateWindowMinimumSize()
+//! NOTE The window can't get smaller than the layout of its docks (in dockArea), nor than its own minimum (baseMinimum)
+static void fitWindowMinimumSizeToLayout(QQuickWindow* win, KDDockWidgets::QtQuick::MainWindow* mainWindow, const QQuickItem* dockArea,
+                                         const QSize& baseMinimum)
 {
-    QQuickWindow* win = window();
-    if (!win || !m_mainWindow || !m_mainWindow->mainWindow() || KDDockWidgets::LayoutSaver::restoreInProgress()) {
+    if (!win || !mainWindow || !mainWindow->mainWindow() || !dockArea || KDDockWidgets::LayoutSaver::restoreInProgress()) {
         return;
     }
 
-    if (m_minimumSizeWindow != win) {
-        m_minimumSizeWindow = win;
-        m_baseWindowMinimumSize = win->minimumSize();
-    }
-
-    KDDockWidgets::Core::Layout* layout = m_mainWindow->mainWindow()->layout();
+    KDDockWidgets::Core::Layout* layout = mainWindow->mainWindow()->layout();
     if (!layout) {
         return;
     }
 
-    //! NOTE Whatever surrounds this item in the window (normally nothing) counts too
-    const QSize chrome = (win->size() - size().toSize()).expandedTo(QSize(0, 0));
-    QSize minimum = m_baseWindowMinimumSize.expandedTo(layout->layoutMinimumSize() + chrome);
+    //! NOTE Whatever surrounds the docks' area in the window counts too
+    const QSize chrome = (win->size() - dockArea->size().toSize()).expandedTo(QSize(0, 0));
+    QSize minimum = baseMinimum.expandedTo(layout->layoutMinimumSize() + chrome);
 
     //! NOTE A layout wider than the screen can't fit anyway: the window stays on it
     if (const QScreen* screen = win->screen()) {
@@ -344,6 +340,31 @@ void DockWindow::updateWindowMinimumSize()
     if (win->minimumSize() != minimum) {
         win->setMinimumSize(minimum);
     }
+}
+
+void DockWindow::updateWindowMinimumSize()
+{
+    QQuickWindow* win = window();
+    if (!win) {
+        return;
+    }
+
+    if (m_minimumSizeWindow != win) {
+        m_minimumSizeWindow = win;
+        m_baseWindowMinimumSize = win->minimumSize();
+    }
+
+    fitWindowMinimumSizeToLayout(win, m_mainWindow, this, m_baseWindowMinimumSize);
+}
+
+void DockWindow::updateSecondaryWindowMinimumSize()
+{
+    if (!m_secondaryWindow || !m_secondaryMainWindow) {
+        return;
+    }
+
+    fitWindowMinimumSizeToLayout(m_secondaryWindow, m_secondaryMainWindow, m_secondaryMainWindow->parentItem(),
+                                 m_baseSecondaryWindowMinimumSize);
 }
 
 void DockWindow::onQuit()
@@ -641,6 +662,10 @@ void DockWindow::initSecondaryWindow()
                                                                    KDDockWidgets::MainWindowOption_None,
                                                                    dockArea);
     m_secondaryMainWindow->setProperty(SECONDARY_WINDOW_ITEM_PROPERTY, true);
+
+    m_baseSecondaryWindowMinimumSize = m_secondaryWindow->minimumSize();
+    connect(m_secondaryMainWindow, &KDDockWidgets::QtQuick::View::geometryUpdated, this,
+            &DockWindow::updateSecondaryWindowMinimumSize);
 
     m_secondaryWindowOpen = uiState()->isVisible(SECONDARY_WINDOW_OPEN_KEY, false);
 
