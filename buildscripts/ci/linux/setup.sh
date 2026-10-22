@@ -105,7 +105,8 @@ $SUDO apt-get install -y --no-install-recommends \
 # COMPILER
 if [ "$COMPILER" == "gcc" ]; then
 
-  gcc_version="14"
+  # MUSE_GCC_VERSION: an older one runs on older Linux systems (the libstdc++ it needs)
+  gcc_version="${MUSE_GCC_VERSION:-14}"
   $SUDO apt install -y --no-install-recommends "g++-${gcc_version}"
 
   for alt in gcc g++ gcov; do
