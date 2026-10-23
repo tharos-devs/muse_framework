@@ -363,9 +363,11 @@ TEST_F(Audio_AudioDriverControllerTests, ChangeCurrentAudioDriver_OpensDefaultDe
     //! [GIVEN] The headphones are opened on the current driver
     givenOpened(HEADPHONES);
 
-    //! [GIVEN] Another driver is available
+    //! [GIVEN] Another driver is available, listing its default device
     const std::string NEW_DRIVER_NAME("DirectSound");
     DriverPtr newDriver = makeDriver(NEW_DRIVER_NAME);
+    ON_CALL(*newDriver->mock, availableOutputDevices())
+    .WillByDefault(Return(AudioDeviceList { AudioDevice { DEFAULT_DEVICE_ID, "Default" } }));
 
     //! [THEN] The current driver is closed
     EXPECT_CALL(*m_currentDriver->mock, close());
