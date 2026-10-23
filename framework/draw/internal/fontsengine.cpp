@@ -281,8 +281,8 @@ double FontsEngine::horizontalAdvance(const Font& f, const std::u32string& text)
         }
 
         const double pixelScale = rf->pixelScaleFor(fontFace);
-        std::vector<GlyphPos> glyphs = fontFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
-        for (const GlyphPos& g : glyphs) {
+        std::vector<ShapedGlyph> glyphs = fontFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
+        for (const ShapedGlyph& g : glyphs) {
             advance += from_f26d6(g.x_advance) * pixelScale;
         }
     }
@@ -336,9 +336,9 @@ RectF FontsEngine::boundingRect(const Font& f, const std::u32string& text) const
             fontFace = rf->face;
         }
 
-        std::vector<GlyphPos> glyphs = fontFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
+        std::vector<ShapedGlyph> glyphs = fontFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
 
-        for (const GlyphPos& g : glyphs) {
+        for (const ShapedGlyph& g : glyphs) {
             FBBox bbox = fontFace->glyphBbox(g.idx);
             f26dot6_t x = xOffset + bbox.x();
             f26dot6_t y = bbox.y();
@@ -407,9 +407,9 @@ RectF FontsEngine::tightBoundingRect(const Font& f, const std::u32string& text) 
             fontFace = rf->face;
         }
 
-        std::vector<GlyphPos> glyphs = fontFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
+        std::vector<ShapedGlyph> glyphs = fontFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
 
-        for (const GlyphPos& g : glyphs) {
+        for (const ShapedGlyph& g : glyphs) {
             FBBox bbox = fontFace->glyphBbox(g.idx);
             f26dot6_t x = xOffset + bbox.x();
             f26dot6_t y = bbox.y();
@@ -452,10 +452,6 @@ std::vector<GlyphImage> FontsEngine::render(const Font& f, const std::u32string&
         return std::vector<GlyphImage>();
     }
 
-    static const std::set<glyph_idx_t> NOT_RENDER_GLYPHS = {
-        3 // space
-    };
-
     std::vector<GlyphImage> images;
 
     if (text.empty()) {
@@ -488,10 +484,10 @@ std::vector<GlyphImage> FontsEngine::render(const Font& f, const std::u32string&
 
         double layoutScale = rf->pixelScaleFor(layoutFace);
         double sdfToLayoutScale = rf->pixelScaleFor(sdfFace);
-        std::vector<GlyphPos> glyphs = layoutFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
+        std::vector<ShapedGlyph> glyphs = layoutFace->glyphs(ffBlock.text.text, ffBlock.text.lenght);
 
-        for (const GlyphPos& g : glyphs) {
-            if (NOT_RENDER_GLYPHS.find(g.idx) == NOT_RENDER_GLYPHS.end()) {
+        for (const ShapedGlyph& g : glyphs) {
+            if (!layoutFace->glyphBbox(g.idx).isEmpty()) {
                 GlyphImage image = m_renderCache.load(sdfFace->key(), g.idx);
                 if (image.isNull()) {
                     image = sdfFace->glyphImage(g.idx);

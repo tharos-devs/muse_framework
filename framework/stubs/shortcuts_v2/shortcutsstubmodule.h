@@ -19,28 +19,27 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MUSE_MI_MULTIINSTANCESUIACTIONS_H
-#define MUSE_MI_MULTIINSTANCESUIACTIONS_H
 
-#include "ui/iuiactionsmodule.h"
+#pragma once
 
-namespace muse::mi {
-class MultiInstancesUiActions : public muse::ui::IUiActionsModule
+#include "modularity/imodulesetup.h"
+
+namespace muse::shortcuts {
+class ShortcutsModule : public modularity::IModuleSetup
 {
 public:
+    std::string moduleName() const override;
+    void registerExports() override;
 
-    MultiInstancesUiActions() = default;
+    modularity::IContextSetup* newContext(const muse::modularity::ContextPtr& ctx) const override;
+};
 
-    const muse::ui::UiActionList& actionsList() const override;
-    bool actionEnabled(const muse::ui::UiAction& act) const override;
-    async::Channel<muse::actions::ActionCodeList> actionEnabledChanged() const override;
+class ShortcutsContext : public modularity::IContextSetup
+{
+public:
+    ShortcutsContext(const muse::modularity::ContextPtr& ctx)
+        : modularity::IContextSetup(ctx) {}
 
-    bool actionChecked(const muse::ui::UiAction& act) const override;
-    async::Channel<muse::actions::ActionCodeList> actionCheckedChanged() const override;
-
-private:
-    static const muse::ui::UiActionList m_actions;
+    void registerExports() override;
 };
 }
-
-#endif // MUSE_MI_MULTIINSTANCESUIACTIONS_H

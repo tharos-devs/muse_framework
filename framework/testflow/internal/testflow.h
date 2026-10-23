@@ -31,7 +31,6 @@
 #include "../itestflowconfiguration.h"
 #include "io/ifilesystem.h"
 #include "ui/inavigationcontroller.h"
-#include "shortcuts/ishortcutsregister.h"
 #include "interactive/iinteractive.h"
 #include "ui/imainwindow.h"
 #include "global/iapplication.h"
@@ -41,6 +40,13 @@
 #include "testcasereport.h"
 #include "testflowinteractive.h"
 
+#include "muse_framework_config.h"
+#ifdef MUSE_MODULE_SHORTCUTS_V2
+#include "shortcuts_v2/icommandshortcutsregister.h"
+#else
+#include "shortcuts/ishortcutsregister.h"
+#endif
+
 namespace muse::testflow {
 class Testflow : public ITestflow, public Contextable, public async::Asyncable
 {
@@ -48,7 +54,11 @@ class Testflow : public ITestflow, public Contextable, public async::Asyncable
     GlobalInject<io::IFileSystem> fileSystem;
     GlobalInject<IApplication> application;
     ContextInject<muse::ui::INavigationController> navigation = { this };
+#ifdef MUSE_MODULE_SHORTCUTS_V2
+    GlobalInject<shortcuts::ICommandShortcutsRegister> commandShortcutsRegister;
+#else
     ContextInject<shortcuts::IShortcutsRegister> shortcutsRegister = { this };
+#endif
     ContextInject<IInteractive> interactive = { this };
     ContextInject<muse::ui::IMainWindow> mainWindow = { this };
 

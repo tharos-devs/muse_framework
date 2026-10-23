@@ -19,27 +19,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MUSE_TESTFLOW_TESTFLOWACTIONS_H
-#define MUSE_TESTFLOW_TESTFLOWACTIONS_H
+ 
+import QtQuick
 
-#include "ui/iuiactionsmodule.h"
-
-namespace muse::testflow {
-class TestflowActions : public ui::IUiActionsModule
-{
-public:
-    TestflowActions() = default;
-
-    const ui::UiActionList& actionsList() const override;
-    bool actionEnabled(const ui::UiAction& act) const override;
-    async::Channel<muse::actions::ActionCodeList> actionEnabledChanged() const override;
-
-    bool actionChecked(const ui::UiAction& act) const override;
-    async::Channel<muse::actions::ActionCodeList> actionCheckedChanged() const override;
-
-private:
-    static const ui::UiActionList m_actions;
-};
-}
-
-#endif // MUSE_TESTFLOW_TESTFLOWACTIONS_H
+QtObject { }
