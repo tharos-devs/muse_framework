@@ -239,9 +239,21 @@ samples_t AudioEngine::process(float* buffer, samples_t samplesPerChannel)
         return samplesPerChannel;
     }
     case OperationType::QuickOperation: {
-        // wait
-        LOGD() << "wait end of quick operation";
-        std::scoped_lock<std::mutex> lock(m_quickOperationWaitMutex);
+        //! NOTE: never wait without a limit here: this runs inside the driver's IO callback, and
+        //! the macOS direct IO callback (HAL IOProc) runs while CoreAudio holds its IO context
+        //! mutex. A quick operation that reaches CoreAudio meanwhile (e.g. a VST3 plugin querying
+        //! the device when it is activated on resume) would then wait for that mutex while we
+        //! wait for the operation: a deadlock. Most quick operations take microseconds, so we
+        //! wait for up to half a block; if the operation is still running, this block stays
+        //! silent, as during a long operation
+        const auto maxWait = std::chrono::microseconds(m_outputSpec.sampleRate > 0
+                                                       ? samplesPerChannel * 500000 / m_outputSpec.sampleRate
+                                                       : 0);
+        std::unique_lock<std::timed_mutex> lock(m_quickOperationWaitMutex, maxWait);
+        if (!lock.owns_lock()) {
+            return 0;
+        }
+
         m_mixer->process(buffer, samplesPerChannel);
         return samplesPerChannel;
     }
