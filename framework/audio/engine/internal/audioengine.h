@@ -71,7 +71,7 @@ private:
 
     std::atomic<bool> m_processing = false;
     std::atomic<OperationType> m_operationType = OperationType::Undefined;
-    std::mutex m_quickOperationWaitMutex;
+    std::timed_mutex m_quickOperationWaitMutex;
 };
 }
 
