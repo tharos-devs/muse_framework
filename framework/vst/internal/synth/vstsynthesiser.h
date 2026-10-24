@@ -70,7 +70,7 @@ public:
 
 private:
     void initSequencer();
-    void updateDeactivationCountdown(const VstSequencer::EventSequenceMap& sequences, const muse::audio::samples_t samplesPerChannel);
+    void updateIdleCountdown(const VstSequencer::EventSequenceMap& sequences, const muse::audio::samples_t samplesPerChannel);
 
     void toggleVolumeGain(const bool isActive);
     void handleSequenceEvents(const VstSequencer::EventSequence& sequence, const audio::samples_t sampleOffset);
@@ -94,9 +94,11 @@ private:
     //! NOTE: the chase is the one of a seek (see applyMidiStateChase())
     bool m_midiStateChaseAfterSeek = false;
 
-    static constexpr double DEACTIVATION_DELAY_SECS = 1.0;
-    //! NOTE: samples left before the plugin is deactivated after stopping (0 = none pending)
-    std::atomic<int64_t> m_deactivationCountdown = 0;
+    static constexpr double IDLE_DELAY_SECS = 1.0;
+    //! NOTE: samples left before the plugin is no longer processed after stopping (0 = none pending)
+    std::atomic<int64_t> m_idleCountdown = 0;
+    //! NOTE: stopped and its tails over: the plugin stays active but isn't processed until something plays
+    std::atomic<bool> m_isIdle = false;
     VstSequencer::EventSequence m_pendingChaseOffEvents;
 };
 
