@@ -59,9 +59,11 @@ public:
 
     Ret addTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends);
     Ret addAuxTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends, bool isGroupBus, aux_channel_idx_t auxChannelIndex);
+    Ret addGroupTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends);
     Ret removeTrack(const TrackId trackId);
 
     void setAuxSends(const TrackId trackId, const AuxSendsParams& auxSends);
+    void setTrackOutput(const TrackId trackId, const TrackId groupTrackId);
 
     void setTracksToProcessWhenIdle(const std::unordered_set<TrackId>& trackIds);
     void setNonMutedTrackCount(size_t count);
@@ -80,8 +82,11 @@ private:
     void processTrackChannels(size_t outBufferSize, size_t samplesPerChannel);
     void mixOutputFromChannel(float* outBuffer, const float* inBuffer, size_t bufferSize) const;
     void prepareAuxBuffers(size_t outBufferSize);
-    void writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends, int sourceAuxPosition = -1);
+    void writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends, int sourceAuxPosition = -1,
+                                bool skipGroupBuses = false);
     void processAuxChannels(float* buffer, samples_t samplesPerChannel);
+    void prepareGroupBuffers(size_t outBufferSize);
+    void processGroupChannels(float* buffer, samples_t samplesPerChannel);
     bool hasActiveGroupBusSend(const AuxSendsParams& auxSends, int sourceAuxPosition = -1) const;
     bool isSilencedByMutedGroupBus(const AuxSendsParams& auxSends, int sourceAuxPosition = -1) const;
     bool isAuxSendRoutable(const AuxSendsParams& auxSends, aux_channel_idx_t auxIdx, int sourceAuxPosition) const;
@@ -89,6 +94,10 @@ private:
     void updateAuxProcessOrder();
 
     bool useMultithreading() const;
+
+    struct TrackData;
+    TrackData* outputGroupTrack(const TrackId trackId);
+    bool isGroupTrackSilenced(const TrackData& group) const;
 
     struct TrackData {
         TrackId trackId;
@@ -106,6 +115,11 @@ private:
 
     std::vector<TrackData> m_tracks;
     std::vector<TrackData> m_auxTracks;
+
+    //! NOTE: group tracks have no source: the tracks routed to one (see setTrackOutput()) are summed into it,
+    //! then it is processed like a track, after them and before the aux buses
+    std::vector<TrackData> m_groupTracks;
+    std::map<TrackId, TrackId> m_trackOutputs;
     std::map<TrackId, AuxSendsParams> m_auxSends;
 
     //! NOTE: a bus can send to other buses - each one is processed only once everything that feeds it was,

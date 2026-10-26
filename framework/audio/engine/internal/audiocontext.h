@@ -68,6 +68,7 @@ public:
     RetVal2<TrackId, TrackParams> addTrack(const std::string& trackName, const mpe::PlaybackData& playbackData,
                                            const TrackParams& params) override;
     RetVal2<TrackId, TrackParams> addAuxTrack(const std::string& trackName, const TrackParams& params) override;
+    RetVal2<TrackId, TrackParams> addGroupTrack(const std::string& trackName, const TrackParams& params) override;
     RetVal2<TrackId, TrackParams> addSoundTrack(const std::string& trackName, const TrackParams& params) override;
 
     void removeTrack(const TrackId trackId) override;
@@ -86,6 +87,7 @@ public:
     void setControlParams(const TrackId trackId, const ControlParams& params) override;
     void setFxChainParams(const TrackId trackId, const AudioFxChain& params) override;
     void setAuxSendsParams(const TrackId trackId, const AuxSendsParams& params) override;
+    void setTrackOutput(const TrackId trackId, const TrackId groupTrackId) override;
 
     async::Channel<TrackId, AudioSourceParams> sourceParamsChanged() const override;
     async::Channel<TrackId, ControlParams> controlParamsChanged() const override;
@@ -138,7 +140,8 @@ private:
         Master_track,
         Event_track,
         Sound_track,
-        Aux_track
+        Aux_track,
+        Group_track
     };
 
     struct Track

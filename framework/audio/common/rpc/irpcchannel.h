@@ -80,6 +80,7 @@ enum class MsgCode {
     AddTrackWithIODevice,
     AddAuxTrack,
     AddSoundTrack,
+    AddGroupTrack,
     // notification
     TrackAdded,
     TrackRemoved,
@@ -90,6 +91,7 @@ enum class MsgCode {
     SetControlParams,
     SetFxChainParams,
     SetAuxSendsParams,
+    SetTrackOutput,
     // notification
     SourceParamsChanged,
     FxChainParamsChanged,
@@ -182,6 +184,7 @@ inline std::string to_string(MsgCode m)
     case MsgCode::AddTrackWithIODevice: return "AddTrackWithIODevice";
     case MsgCode::AddAuxTrack: return "AddAuxTrack";
     case MsgCode::AddSoundTrack: return "AddSoundTrack";
+    case MsgCode::AddGroupTrack: return "AddGroupTrack";
     case MsgCode::TrackAdded: return "TrackAdded";
     case MsgCode::TrackRemoved: return "TrackRemoved";
 
@@ -191,6 +194,7 @@ inline std::string to_string(MsgCode m)
     case MsgCode::SetControlParams: return "SetControlParams";
     case MsgCode::SetFxChainParams: return "SetFxChainParams";
     case MsgCode::SetAuxSendsParams: return "SetAuxSendsParams";
+    case MsgCode::SetTrackOutput: return "SetTrackOutput";
     // notification
     case MsgCode::SourceParamsChanged: return "SourceParamsChanged";
     case MsgCode::FxChainParamsChanged: return "FxChainParamsChanged";
