@@ -319,6 +319,25 @@ void EngineRpcController::init()
             }
         });
 
+        onLongRequest(ctxId, MsgCode::AddGroupTrack, [this](const Msg& msg) {
+            ONLY_AUDIO_RPC_THREAD;
+
+            using RetType = RetVal2<TrackId, TrackParams>;
+
+            TrackName trackName;
+            TrackParams params;
+            IF_ASSERT_FAILED(RpcPacker::unpack(msg.data, trackName, params)) {
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidRpcData)));
+            }
+
+            if (auto actx = audioContext(msg.ctxId)) {
+                RetType ret = actx->addGroupTrack(trackName, params);
+                return make_response(msg, RpcPacker::pack(ret));
+            } else {
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidContext)));
+            }
+        });
+
         onLongRequest(ctxId, MsgCode::AddSoundTrack, [this](const Msg& msg) {
             ONLY_AUDIO_RPC_THREAD;
 
@@ -459,6 +478,22 @@ void EngineRpcController::init()
 
             if (auto actx = audioContext(msg.ctxId)) {
                 actx->setFxChainParams(trackId, params);
+                return make_response_ret(msg, make_ok());
+            } else {
+                return make_response_ret(msg, make_ret(Err::InvalidContext));
+            }
+        });
+
+        onLongRequest(ctxId, MsgCode::SetTrackOutput, [this](const Msg& msg) {
+            ONLY_AUDIO_RPC_THREAD;
+            TrackId trackId = 0;
+            TrackId groupTrackId = 0;
+            IF_ASSERT_FAILED(RpcPacker::unpack(msg.data, trackId, groupTrackId)) {
+                return make_response_ret(msg, make_ret(Err::InvalidRpcData));
+            }
+
+            if (auto actx = audioContext(msg.ctxId)) {
+                actx->setTrackOutput(trackId, groupTrackId);
                 return make_response_ret(msg, make_ok());
             } else {
                 return make_response_ret(msg, make_ret(Err::InvalidContext));

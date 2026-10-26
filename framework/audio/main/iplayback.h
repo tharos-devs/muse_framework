@@ -65,6 +65,8 @@ public:
                                                           const TrackParams& params) = 0;
 
     virtual async::Promise<TrackId, TrackParams> addAuxTrack(const TrackName& trackName, const TrackParams& params) = 0;
+    //! NOTE: a group track has no source: the tracks routed to it with setTrackOutput() are its input
+    virtual async::Promise<TrackId, TrackParams> addGroupTrack(const TrackName& trackName, const TrackParams& params) = 0;
 
     //! NOTE A track playing a pre-decoded 16-bit PCM WAV file on the engine's timeline, e.g. the audio of
     //! an attached video. The file path, offset and export flag are set in params.source.configuration
@@ -86,6 +88,8 @@ public:
     virtual void setControlParams(const TrackId trackId, const ControlParams& params) = 0;
     virtual void setFxChainParams(const TrackId trackId, const AudioFxChain& params) = 0;
     virtual void setAuxSendsParams(const TrackId trackId, const AuxSendsParams& params) = 0;
+    //! NOTE: routes a track to a group track instead of master (INVALID_TRACK_ID: back to master)
+    virtual void setTrackOutput(const TrackId trackId, const TrackId groupTrackId) = 0;
 
     // These parameters can be changed within the audio system.
     virtual async::Channel<TrackId, AudioSourceParams> sourceParamsChanged() const = 0;

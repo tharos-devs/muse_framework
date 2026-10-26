@@ -107,9 +107,72 @@ Ret Mixer::addAuxTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends,
     return make_ok();
 }
 
+Ret Mixer::addGroupTrack(TrackChainPtr trackChain, const AuxSendsParams& auxSends)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+    const size_t outBufferSize = m_outputSpec.samplesPerChannel * m_outputSpec.audioChannelCount;
+
+    TrackData trackData;
+    trackData.trackId = trackChain->trackId();
+    trackData.chain = trackChain;
+    trackData.buffer.resize(outBufferSize);
+
+    m_auxSends[trackData.trackId] = auxSends;
+    m_groupTracks.emplace_back(std::move(trackData));
+
+    return make_ok();
+}
+
+void Mixer::setTrackOutput(const TrackId trackId, const TrackId groupTrackId)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    if (groupTrackId == INVALID_TRACK_ID) {
+        m_trackOutputs.erase(trackId);
+    } else {
+        m_trackOutputs[trackId] = groupTrackId;
+    }
+}
+
+Mixer::TrackData* Mixer::outputGroupTrack(const TrackId trackId)
+{
+    auto it = m_trackOutputs.find(trackId);
+    if (it == m_trackOutputs.end()) {
+        return nullptr;
+    }
+
+    for (TrackData& group : m_groupTracks) {
+        if (group.trackId == it->second) {
+            return &group;
+        }
+    }
+
+    return nullptr;
+}
+
+//! NOTE: a muted group silences the tracks routed to it, sends included, like a muted group bus
+bool Mixer::isGroupTrackSilenced(const TrackData& group) const
+{
+    AutomationControlNodePtr control = group.chain->control();
+    if (control && control->muted()) {
+        return true;
+    }
+
+    return isSilencedByMutedGroupBus(auxSendsOf(group.trackId));
+}
+
 Ret Mixer::removeTrack(const TrackId trackId)
 {
     ONLY_AUDIO_ENGINE_THREAD;
+
+    m_trackOutputs.erase(trackId);
+
+    if (muse::remove_if(m_groupTracks, [trackId](const TrackData& track) {
+        return track.trackId == trackId;
+    })) {
+        m_auxSends.erase(trackId);
+        return make_ret(Ret::Code::Ok);
+    }
 
     bool removed = muse::remove_if(m_tracks, [trackId](const TrackData& track) {
         return track.trackId == trackId;
@@ -256,6 +319,10 @@ void Mixer::onOutputSpecChanged(const OutputSpec& spec)
         t.chain->setOutputSpec(spec);
     }
 
+    for (auto& t : m_groupTracks) {
+        t.chain->setOutputSpec(spec);
+    }
+
     for (auto& t : m_auxTracks) {
         if (t.chain) {
             t.chain->setOutputSpec(spec);
@@ -268,6 +335,10 @@ void Mixer::onModeChanged(const ProcessMode mode)
     ONLY_AUDIO_ENGINE_THREAD;
 
     for (auto& t : m_tracks) {
+        t.chain->setMode(mode);
+    }
+
+    for (auto& t : m_groupTracks) {
         t.chain->setMode(mode);
     }
 
@@ -291,6 +362,7 @@ void Mixer::process(float* outBuffer, samples_t samplesPerChannel)
     processTrackChannels(outBufferSize, samplesPerChannel);
 
     prepareAuxBuffers(outBufferSize);
+    prepareGroupBuffers(outBufferSize);
 
     for (auto& t : m_tracks) {
         if (!t.processed) {
@@ -304,6 +376,21 @@ void Mixer::process(float* outBuffer, samples_t samplesPerChannel)
         }
 
         const AuxSendsParams& auxSends = m_auxSends[t.trackId];
+
+        //! NOTE: a track routed to a group track reaches master only through it. Its own sends to group
+        //! buses are ignored: the group track sends on instead. Its other sends (e.g. a reverb) stay
+        if (TrackData* group = outputGroupTrack(t.trackId)) {
+            if (isGroupTrackSilenced(*group)) {
+                continue;
+            }
+
+            mixOutputFromChannel(group->buffer.data(), t.buffer.data(), outBufferSize);
+            group->processed = true;
+            group->silenceGraceSamplesLeft = static_cast<samples_t>(AUX_SILENCE_GRACE_SECONDS * m_outputSpec.sampleRate);
+
+            writeTrackToAuxBuffers(t.buffer.data(), outBufferSize, auxSends, -1, /*skipGroupBuses*/ true);
+            continue;
+        }
 
         //! NOTE: a track routed to a "group" bus has that bus as its ONLY path to master AND
         //! to any other aux send - if that group bus is muted, the track is entirely silent,
@@ -324,6 +411,7 @@ void Mixer::process(float* outBuffer, samples_t samplesPerChannel)
         writeTrackToAuxBuffers(t.buffer.data(), outBufferSize, auxSends);
     }
 
+    processGroupChannels(outBuffer, samplesPerChannel);
     processAuxChannels(outBuffer, samplesPerChannel);
 }
 
@@ -436,8 +524,52 @@ void Mixer::prepareAuxBuffers(size_t outBufferSize)
     }
 }
 
+void Mixer::prepareGroupBuffers(size_t outBufferSize)
+{
+    for (auto& group : m_groupTracks) {
+        group.processed = false;
+        group.buffer.resize(outBufferSize);
+        std::fill(group.buffer.begin(), group.buffer.begin() + outBufferSize, 0.f);
+    }
+}
+
+void Mixer::processGroupChannels(float* buffer, samples_t samplesPerChannel)
+{
+    const size_t outBufferSize = samplesPerChannel * m_outputSpec.audioChannelCount;
+
+    for (TrackData& group : m_groupTracks) {
+        if (isGroupTrackSilenced(group)) {
+            continue;
+        }
+
+        //! NOTE: same grace period as an aux bus (see processAuxChannels()), for its fx tail and its meter
+        if (!group.processed) {
+            if (group.silenceGraceSamplesLeft == 0) {
+                continue;
+            }
+
+            group.silenceGraceSamplesLeft -= std::min(group.silenceGraceSamplesLeft, static_cast<samples_t>(samplesPerChannel));
+        }
+
+        float* groupBuffer = group.buffer.data();
+        group.chain->process(groupBuffer, samplesPerChannel);
+
+        SignalNodePtr signal = group.chain->signal();
+        if (!signal || signal->isSilent()) {
+            continue;
+        }
+
+        const AuxSendsParams& auxSends = auxSendsOf(group.trackId);
+        if (!hasActiveGroupBusSend(auxSends)) {
+            mixOutputFromChannel(buffer, groupBuffer, outBufferSize);
+        }
+
+        writeTrackToAuxBuffers(groupBuffer, outBufferSize, auxSends);
+    }
+}
+
 void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSize, const AuxSendsParams& auxSends,
-                                   int sourceAuxPosition)
+                                   int sourceAuxPosition, bool skipGroupBuses)
 {
     for (aux_channel_idx_t auxIdx = 0; auxIdx < auxSends.size(); ++auxIdx) {
         if (auxIdx >= m_auxTracks.size()) {
@@ -445,7 +577,7 @@ void Mixer::writeTrackToAuxBuffers(const float* trackBuffer, size_t outBufferSiz
         }
 
         TrackData& aux = m_auxTracks.at(auxIdx);
-        if (!aux.chain || !aux.chain->fxChain()) {
+        if (!aux.chain || !aux.chain->fxChain() || (skipGroupBuses && aux.isGroupBus)) {
             continue;
         }
 
@@ -604,6 +736,13 @@ std::string Mixer::dump() const
     for (const auto& track : m_tracks) {
         ss << "\n";
         ss << std::string(indent, ' ') << "<--[" << track.trackId << "] " << track.chain->dump();
+    }
+
+    ss << "\n";
+    ss << std::string(indent, ' ') << "groups: " << m_groupTracks.size();
+    for (const auto& group : m_groupTracks) {
+        ss << "\n";
+        ss << std::string(indent, ' ') << "<--[" << group.trackId << "] " << group.chain->dump();
     }
 
     ss << "\n";

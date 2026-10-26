@@ -289,6 +289,49 @@ RetVal2<TrackId, TrackParams> AudioContext::addAuxTrack(const std::string& track
     return RetType::make_ok(trackId, track.params);
 }
 
+//! NOTE: a group track has no source: the tracks routed to it (see setTrackOutput()) are its input
+RetVal2<TrackId, TrackParams> AudioContext::addGroupTrack(const std::string& trackName,
+                                                          const TrackParams& params)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    using RetType = RetVal2<TrackId, TrackParams>;
+
+    TrackId trackId = newTrackId();
+
+    AutomationControlNodePtr controlNode = std::make_shared<AutomationControlNode>();
+    controlNode->setPlayheadPosition(std::static_pointer_cast<IPlayheadPosition>(m_player));
+
+    TrackChainPtr trackChain = std::make_shared<TrackChain>(trackId, trackName);
+    trackChain->setOutputSpec(outputSpec());
+    trackChain->setMode(mode());
+    trackChain->setFxChain(nullptr); // will be added later
+    trackChain->setGain(std::make_shared<GainNode>());
+    trackChain->setEq(std::make_shared<EqNode>());
+    trackChain->setControl(controlNode);
+    trackChain->setSignal(std::make_shared<SignalNode>());
+    trackChain->rebuild();
+
+    Ret ret = m_mixer->addGroupTrack(trackChain, params.auxSends);
+    if (!ret) {
+        return RetType::make_ret(ret);
+    }
+
+    Track track;
+    track.type = TrackType::Group_track;
+    track.id = trackId;
+    track.name = trackName;
+    track.params = params;
+    track.chain = trackChain;
+
+    onFxChainParamsChanged(track, params.fxChain);
+    onControlParamsChanged(track, params.control);
+
+    doAddTrack(track);
+
+    return RetType::make_ok(trackId, track.params);
+}
+
 RetVal2<TrackId, TrackParams> AudioContext::addSoundTrack(const std::string& trackName,
                                                           const TrackParams& params)
 {
@@ -667,6 +710,12 @@ void AudioContext::setAuxSendsParams(const TrackId trackId, const AuxSendsParams
             m_auxSendsParamsChanged.send(trackId, t->params.auxSends);
         }
     }
+}
+
+void AudioContext::setTrackOutput(const TrackId trackId, const TrackId groupTrackId)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+    m_mixer->setTrackOutput(trackId, groupTrackId);
 }
 
 async::Channel<TrackId, AudioSourceParams> AudioContext::sourceParamsChanged() const
