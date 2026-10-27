@@ -19,27 +19,22 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MUSE_MUSESAMPLER_MUSESAMLERUIACTIONS_H
-#define MUSE_MUSESAMPLER_MUSESAMLERUIACTIONS_H
+#ifndef MUSE_SHORTCUTS_SHORTCUTSCONTROLLERSTUB_H
+#define MUSE_SHORTCUTS_SHORTCUTSCONTROLLERSTUB_H
 
-#include "ui/iuiactionsmodule.h"
+#include "shortcuts_v2/ishortcutscontroller.h"
 
-namespace muse::musesampler {
-class MuseSamplerUiActions : public muse::ui::IUiActionsModule
+namespace muse::shortcuts {
+class ShortcutsControllerStub : public IShortcutsController
 {
 public:
-    MuseSamplerUiActions() = default;
 
-    const muse::ui::UiActionList& actionsList() const override;
-    bool actionEnabled(const muse::ui::UiAction& act) const override;
-    async::Channel<muse::actions::ActionCodeList> actionEnabledChanged() const override;
+    bool active() override;
+    void setActive(bool active) override;
+    async::Notification activeChanged() const override;
 
-    bool actionChecked(const muse::ui::UiAction& act) const override;
-    async::Channel<muse::actions::ActionCodeList> actionCheckedChanged() const override;
-
-private:
-    static const muse::ui::UiActionList m_actions;
+    void activate(const std::string& sequence) override;
 };
 }
 
-#endif // MUSE_MUSESAMPLER_MUSESAMLERUIACTIONS_H
+#endif // MUSE_SHORTCUTS_SHORTCUTSCONTROLLERSTUB_H

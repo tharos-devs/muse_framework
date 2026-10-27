@@ -109,6 +109,7 @@ FocusScope {
 
         onTriggered: {
             if (navCtrl.enabled) {
+                menuLoader.close()
                 root.clicked()
                 navCtrl.notifyAboutControlWasTriggered()
             }
@@ -217,6 +218,8 @@ FocusScope {
                 onClicked: {
                     ui.tooltip.hide(root, true)
                     navCtrl.requestActiveByInteraction()
+                    // The menu is parented to this button, so this click doesn't count as outside it
+                    menuLoader.close()
                     root.clicked()
                 }
 

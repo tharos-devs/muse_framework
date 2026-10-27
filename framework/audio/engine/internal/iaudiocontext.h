@@ -48,6 +48,7 @@ public:
     virtual RetVal2<TrackId, TrackParams> addTrack(const TrackName& trackName, const mpe::PlaybackData& playbackData,
                                                    const TrackParams& params) = 0;
     virtual RetVal2<TrackId, TrackParams> addAuxTrack(const TrackName& trackName, const TrackParams& params) = 0;
+    virtual RetVal2<TrackId, TrackParams> addGroupTrack(const TrackName& trackName, const TrackParams& params) = 0;
     virtual RetVal2<TrackId, TrackParams> addSoundTrack(const TrackName& trackName, const TrackParams& params) = 0;
 
     virtual void removeTrack(const TrackId trackId) = 0;
@@ -65,6 +66,7 @@ public:
     virtual void setControlParams(const TrackId trackId, const ControlParams& params) = 0;
     virtual void setFxChainParams(const TrackId trackId, const AudioFxChain& params) = 0;
     virtual void setAuxSendsParams(const TrackId trackId, const AuxSendsParams& params) = 0;
+    virtual void setTrackOutput(const TrackId trackId, const TrackId groupTrackId) = 0;
 
     virtual async::Channel<TrackId, AudioSourceParams> sourceParamsChanged() const = 0;
     virtual async::Channel<TrackId, ControlParams> controlParamsChanged() const = 0;

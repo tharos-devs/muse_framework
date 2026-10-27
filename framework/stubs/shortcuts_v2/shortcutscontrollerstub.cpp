@@ -19,27 +19,24 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MUSE_DIAGNOSTICS_DIAGNOSTICSACTIONS_H
-#define MUSE_DIAGNOSTICS_DIAGNOSTICSACTIONS_H
+#include "shortcutscontrollerstub.h"
 
-#include "ui/iuiactionsmodule.h"
+using namespace muse::shortcuts;
 
-namespace muse::diagnostics {
-class DiagnosticsActions : public muse::ui::IUiActionsModule
+bool ShortcutsControllerStub::active()
 {
-public:
-    DiagnosticsActions() = default;
-
-    const muse::ui::UiActionList& actionsList() const override;
-    bool actionEnabled(const muse::ui::UiAction& act) const override;
-    muse::async::Channel<muse::actions::ActionCodeList> actionEnabledChanged() const override;
-
-    bool actionChecked(const muse::ui::UiAction& act) const override;
-    muse::async::Channel<muse::actions::ActionCodeList> actionCheckedChanged() const override;
-
-private:
-    static const muse::ui::UiActionList m_actions;
-};
+    return false;
 }
 
-#endif // MUSE_DIAGNOSTICS_DIAGNOSTICSACTIONS_H
+void ShortcutsControllerStub::setActive(bool)
+{
+}
+
+muse::async::Notification ShortcutsControllerStub::activeChanged() const
+{
+    return async::Notification();
+}
+
+void ShortcutsControllerStub::activate(const std::string&)
+{
+}
