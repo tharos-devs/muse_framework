@@ -321,7 +321,9 @@ void QPainterProvider::setMask(const RectF& background, const std::vector<RectF>
 
     QPainterPath mask = backgroundPath.subtracted(exclusionRegion);
 
-    m_painter->setClipPath(mask);
+    // Intersect, so that a partial repaint's clip is kept: replacing it would
+    // draw the masked item outside the repainted area, over the previous frame
+    m_painter->setClipPath(mask, Qt::IntersectClip);
 }
 
 void QPainterProvider::setClipping(bool enable)
