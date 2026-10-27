@@ -27,6 +27,7 @@
 #include <vector>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <regex>
 
 #include "containers.h"
@@ -487,14 +488,21 @@ inline String operator+(const char16_t* s1, const String& s2) { String t(s1); t 
 // ============================
 // Char (UTF-16)
 // ============================
-inline bool operator ==(const char16_t c1, const muse::Char c2) { return c2 == c1; }
-inline bool operator !=(const char16_t c1, const muse::Char c2) { return c2 != c1; }
+// Templates so that a QChar (implicitly convertible to muse::Char) doesn't match them:
+// with C++20 reversed candidates, GCC 12 reports QChar == char as ambiguous otherwise
+template<typename T, std::enable_if_t<std::is_same_v<T, muse::Char>, int> = 0>
+inline bool operator ==(const char16_t c1, const T c2) { return c2 == c1; }
+template<typename T, std::enable_if_t<std::is_same_v<T, muse::Char>, int> = 0>
+inline bool operator !=(const char16_t c1, const T c2) { return c2 != c1; }
 
 // ============================
 // String (UTF-16)
 // ============================
-inline bool operator ==(const char16_t* s1, const muse::String& s2) { return s2 == s1; }
-inline bool operator !=(const char16_t* s1, const muse::String& s2) { return s2 != s1; }
+// Same as for Char, with QString
+template<typename T, std::enable_if_t<std::is_same_v<T, muse::String>, int> = 0>
+inline bool operator ==(const char16_t* s1, const T& s2) { return s2 == s1; }
+template<typename T, std::enable_if_t<std::is_same_v<T, muse::String>, int> = 0>
+inline bool operator !=(const char16_t* s1, const T& s2) { return s2 != s1; }
 
 template<>
 struct std::hash<muse::String>
