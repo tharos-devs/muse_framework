@@ -217,6 +217,10 @@ void PolylinePlot::init()
             rebuildVisiblePoints();
         }
 
+        if (m_drawing) {
+            emit freehandDrawCancelled();
+        }
+
         // emit signal and let decide model what to do
         emit dragCancelled();
         // Qt suppresses hover events while a mouse button is held, so the
@@ -771,6 +775,20 @@ void PolylinePlot::updateBaselineFromDefaultValue()
 
 void PolylinePlot::updateActivePoint()
 {
+    // Drawing freehand: the mouse is the active point (its value readout included)
+    if (m_drawing) {
+        const qreal value = drawnPointDomain(m_drawPx).y();
+        const QPointF px(std::clamp(m_drawPx.x(), 0.0, width()), std::clamp(m_drawPx.y(), 0.0, height()));
+        const bool changed = !m_hasActivePoint || px != m_activePointPx || std::abs(value - m_activePointValue) > EPSILON;
+        m_hasActivePoint = true;
+        m_activePointPx = px;
+        m_activePointValue = value;
+        if (changed) {
+            emit activePointChanged();
+        }
+        return;
+    }
+
     // A bend being dragged: its handle is the active point (its value readout included)
     if (m_pressedBendIndex >= 0) {
         if (const std::optional<QPointF> handleN = bendHandleN(m_pressedBendIndex)) {
@@ -1376,6 +1394,7 @@ void PolylinePlot::resetGestureState()
     m_movedSincePress = false;
     m_pressedBendIndex = INVALID_POINT_IDX;
     m_pressPx = QPointF(0.0, 0.0);
+    m_drawing = false;
 
     updateCursor();
     updateActivePoint();
@@ -1385,6 +1404,26 @@ void PolylinePlot::resetGestureState()
 void PolylinePlot::setPointValueEditEnabled(bool enabled)
 {
     m_pointValueEditEnabled = enabled;
+}
+
+void PolylinePlot::setFreehandDrawEnabled(bool enabled)
+{
+    m_freehandDrawEnabled = enabled;
+}
+
+QPointF PolylinePlot::drawnPointDomain(const QPointF& px) const
+{
+    return domainFromNormalized(clamp01(QPointF(px.x() / width(), 1.0 - (px.y() / height()))));
+}
+
+void PolylinePlot::mouseUngrabEvent()
+{
+    // E.g. a popup took the mouse: a stroke not completed by then is dropped
+    if (m_drawing) {
+        emit freehandDrawCancelled();
+        emit interactionFinished();
+        resetGestureState();
+    }
 }
 
 void PolylinePlot::geometryChange(const QRectF& newG, const QRectF& oldG)
@@ -1679,6 +1718,23 @@ void PolylinePlot::mousePressEvent(QMouseEvent* e)
         m_selectedPointsIndices.clear();
     }
 
+    // Freehand drawing: anywhere in the item, decided on press for the whole gesture
+    if (m_freehandDrawEnabled && (e->modifiers() & Qt::AltModifier) && width() > 0 && height() > 0) {
+        resetGestureState();
+        e->accept();
+
+        m_pressed = true;
+        m_pressPx = e->position();
+        m_drawing = true;
+        m_drawPx = e->position();
+        m_lastDrawnDomain = drawnPointDomain(e->position());
+        updateCursor();
+        emit freehandDrawn(m_lastDrawnDomain, m_lastDrawnDomain, /*completed*/ false);
+        updateActivePoint();
+        update();
+        return;
+    }
+
     const int pointIndex = pointIndexAtPx(e->position());
     const bool onPoint = pointIndex >= 0;
     const int bendIndex = onPoint ? INVALID_POINT_IDX : bendHandleIndexAtPx(e->position());
@@ -1766,6 +1822,16 @@ void PolylinePlot::mouseMoveEvent(QMouseEvent* e)
         m_movedSincePress = true;
     }
 
+    if (m_drawing) {
+        const QPointF drawn = drawnPointDomain(pos);
+        m_drawPx = pos;
+        emit freehandDrawn(m_lastDrawnDomain, drawn, /*completed*/ false);
+        m_lastDrawnDomain = drawn;
+        updateActivePoint();
+        update();
+        return;
+    }
+
     // bend a segment: its handle only moves vertically, between the two points' values
     if (m_pressedBendIndex >= 0) {
         // Not a drag yet (a click may still be meant, see mouseReleaseEvent) - and the points may have changed under
@@ -1830,6 +1896,16 @@ void PolylinePlot::mouseReleaseEvent(QMouseEvent* e)
 
     const bool isClick = !m_movedSincePress;
     const QPointF rel = e->position();
+
+    if (m_drawing) {
+        const QPointF drawn = drawnPointDomain(rel);
+        const QPointF from = m_lastDrawnDomain;
+        // Reset first: the model may set new points right away
+        resetGestureState();
+        emit freehandDrawn(from, drawn, /*completed*/ true);
+        emit interactionFinished();
+        return;
+    }
 
     // commit a bend
     if (m_pressedBendIndex >= 0) {

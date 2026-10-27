@@ -214,6 +214,10 @@ public:
     //! instead of starting a drag
     void setPointValueEditEnabled(bool enabled);
 
+    //! NOTE: off by default: Alt (Option on macOS) + press anywhere in the item then draws freehand - the model gets
+    //! the path as freehandDrawn() strokes, and decides what it makes of them (the points aren't changed here)
+    void setFreehandDrawEnabled(bool enabled);
+
     void geometryChange(const QRectF& newG, const QRectF& oldG) override;
     void paint(QPainter* painter) override;
 
@@ -237,6 +241,10 @@ signals:
     void segmentBendMoved(int segmentIndex, qreal value, bool completed);
     //! NOTE: Ctrl+click (Cmd+click on macOS) on a point: the model may let the user type its value. The point isn't dragged
     void pointValueEditRequested(int index, const QPointF& positionPx);
+    //! NOTE: freehand drawing (see setFreehandDrawEnabled()): the path from one mouse position to the next, in the
+    //! domain (the same position twice on press); completed on release. Cancelled: back to the points as they were
+    void freehandDrawn(const QPointF& from, const QPointF& to, bool completed);
+    void freehandDrawCancelled();
     void dragCancelled();
     void interactionFinished();
 
@@ -264,6 +272,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
+    void mouseUngrabEvent() override;
 
 private:
     QVector<QPointF> polylinePx() const;
@@ -303,6 +312,7 @@ private:
 
     QPointF snapToNeighbor(qreal dragPxX, QPointF pDomain) const;
     void updateActivePoint();
+    QPointF drawnPointDomain(const QPointF& px) const;
 
     void drawLinesAndFillUnder(QPainter* painter) const;
     void paintBendHandles(QPainter* painter) const;
@@ -334,6 +344,7 @@ private:
     ValueMapping m_yToValue;
     ValueMapping m_valueToY;
     bool m_pointValueEditEnabled = false;
+    bool m_freehandDrawEnabled = false;
 
     //! NOTE: the line actually drawn, bends sampled: normalized, sorted by x, each with the index (into
     //! m_colorsUnderLine) of the color under the stretch starting there
@@ -373,6 +384,10 @@ private:
     QPointF m_draggedPointDomain;
 
     bool m_movedSincePress = false;
+
+    bool m_drawing = false; // freehand, see setFreehandDrawEnabled()
+    QPointF m_drawPx;
+    QPointF m_lastDrawnDomain;
 
     int m_pressedBendIndex = -1;
     qreal m_pressedBendOriginalValue = 0.5; // restored if the drag is cancelled
