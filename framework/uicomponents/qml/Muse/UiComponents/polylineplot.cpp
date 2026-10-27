@@ -1959,6 +1959,16 @@ void PolylinePlot::mouseDoubleClickEvent(QMouseEvent* e)
         return;
     }
 
+    // Freehand drawing: a double click is just a press of the stroke (not a point removal), completed on release
+    if (m_drawing) {
+        e->accept();
+        return;
+    }
+    if (m_freehandDrawEnabled && (e->modifiers() & Qt::AltModifier)) {
+        mousePressEvent(e);
+        return;
+    }
+
     const int idx = pointIndexAtPx(e->position());
     if (idx < 0) {
         // a bend handle: straight again
