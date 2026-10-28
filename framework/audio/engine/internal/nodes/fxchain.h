@@ -63,6 +63,9 @@ private:
 
     bool m_shouldProcessDuringSilence = false;
     async::Channel<bool> m_shouldProcessDuringSilenceChanged;
+
+    //! NOTE: how long the chain's input and output have been silent, see doSelfProcess()
+    samples_t m_silentSamples = 0;
 };
 
 using FxChainPtr = std::shared_ptr<FxChain>;

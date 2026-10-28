@@ -21,6 +21,9 @@
  */
 
 #include "fxchain.h"
+
+#include <cmath>
+
 #include "fxnode.h"
 
 #include "log.h"
@@ -29,9 +32,27 @@ using namespace muse;
 using namespace muse::audio;
 using namespace muse::audio::engine;
 
+//! NOTE: -100 dBFS, below what the meters show
+static constexpr float SILENCE_PEAK = 0.00001f;
+
+//! NOTE: comfortably longer than the effects' latency, which delays their output after their input stops
+static constexpr float SUSPEND_AFTER_SILENT_SECS = 1.f;
+
+static bool isSilent(const float* buffer, size_t size)
+{
+    for (size_t i = 0; i < size; ++i) {
+        if (std::fabs(buffer[i]) > SILENCE_PEAK) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void FxChain::setFxList(const std::vector<IFxProcessorPtr>& fxList)
 {
     clear();
+    m_silentSamples = 0;
 
     for (auto it = fxList.rbegin(); it != fxList.rend(); ++it) {
         FxNodePtr node = std::make_shared<FxNode>(*it);
@@ -134,10 +155,30 @@ void FxChain::rebuild()
     }
 }
 
+//! NOTE: suspended on silence, as in a DAW: once the chain's input and its output have stayed silent for a while (the
+//! effects' tails are over), the effects aren't processed as long as the input stays silent. Processing silence was
+//! most of the audio CPU when stopped (a VST effect costing as much as when playing), and the tracks that don't play
+//! cost the same during playback. Not for an effect that makes sound out of silence (see shouldProcessDuringSilence())
 void FxChain::doSelfProcess(float* buffer, samples_t samplesPerChannel)
 {
-    if (!m_nodes.empty()) {
-        m_nodes.front()->process(buffer, samplesPerChannel);
+    if (m_nodes.empty()) {
+        return;
+    }
+
+    const size_t bufferSize = samplesPerChannel * m_outputSpec.audioChannelCount;
+    const bool inputSilent = !m_shouldProcessDuringSilence && isSilent(buffer, bufferSize);
+    const samples_t suspendAfterSamples = static_cast<samples_t>(SUSPEND_AFTER_SILENT_SECS * m_outputSpec.sampleRate);
+
+    if (inputSilent && m_silentSamples >= suspendAfterSamples) {
+        return;
+    }
+
+    m_nodes.front()->process(buffer, samplesPerChannel);
+
+    if (inputSilent && isSilent(buffer, bufferSize)) {
+        m_silentSamples += samplesPerChannel;
+    } else {
+        m_silentSamples = 0;
     }
 }
 
