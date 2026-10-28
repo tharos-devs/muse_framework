@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "chainnode.h"
 #include "audio/engine/ifxprocessor.h"
 #include "audio/engine/iplayhead.h"
@@ -61,7 +63,8 @@ private:
     AudioFxChain m_fxChainSpec;
     async::Channel<AudioFxChain> m_fxChainSpecChanged;
 
-    bool m_shouldProcessDuringSilence = false;
+    //! NOTE: atomic: also read by doSelfProcess(), on the audio processing thread
+    std::atomic<bool> m_shouldProcessDuringSilence = false;
     async::Channel<bool> m_shouldProcessDuringSilenceChanged;
 
     //! NOTE: how long the chain's input and output have been silent, see doSelfProcess()

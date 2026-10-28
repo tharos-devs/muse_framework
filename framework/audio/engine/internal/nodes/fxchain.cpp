@@ -41,7 +41,8 @@ static constexpr float SUSPEND_AFTER_SILENT_SECS = 1.f;
 static bool isSilent(const float* buffer, size_t size)
 {
     for (size_t i = 0; i < size; ++i) {
-        if (std::fabs(buffer[i]) > SILENCE_PEAK) {
+        //! NOTE: not "> SILENCE_PEAK": a NaN isn't silence
+        if (!(std::fabs(buffer[i]) <= SILENCE_PEAK)) {
             return false;
         }
     }
